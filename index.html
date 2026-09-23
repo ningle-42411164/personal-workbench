@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="splash-pending">
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -11,8 +11,30 @@
     <title>我的工作台</title>
     <link rel="icon" href="/favicon-64.png" type="image/png" sizes="64x64">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
+    <style>
+      html, body { background: #f5f4ef; }
+      #boot-splash { display: none; }
+      .splash-pending main { visibility: hidden; }
+      .splash-pending #boot-splash {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 1001;
+        background: #f5f4ef url('/launch-splash.png') center / cover no-repeat;
+      }
+    </style>
+    <script>
+      try {
+        if (sessionStorage.getItem('personal-workbench.splash.seen.v1')) {
+          document.documentElement.classList.remove('splash-pending');
+        }
+      } catch {
+        // 无法使用 sessionStorage 时仍展示启动页。
+      }
+    </script>
   </head>
   <body>
+    <div id="boot-splash" aria-hidden="true"></div>
     <div id="app"></div>
     <script type="module" src="/src/main.js"></script>
   </body>
