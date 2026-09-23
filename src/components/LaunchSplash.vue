@@ -5,7 +5,7 @@ const storageKey = 'personal-workbench.splash.seen.v1';
 const visible = ref(document.documentElement.classList.contains('splash-pending'));
 const closing = ref(false);
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-const splashUrl = `${import.meta.env.BASE_URL}launch-splash.png`;
+const splashUrl = `${import.meta.env.BASE_URL}launch-splash.webp`;
 const splashLoaded = ref(false);
 
 let finishTimer;
