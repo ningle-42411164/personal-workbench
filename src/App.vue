@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { useRegisterSW } from 'virtual:pwa-register/vue';
+import LaunchSplash from './components/LaunchSplash.vue';
 
 const storageKey = 'personal-workbench.tasks.v1';
 const tasks = ref([]);
@@ -66,6 +67,7 @@ function exportTasks() {
 </script>
 
 <template>
+  <LaunchSplash />
   <main>
     <header><span>PERSONAL WORKBENCH · 起步版</span><h1>我的工作台</h1><p>事情越干越多······</p></header>
     <p v-if="offlineReady" class="notice" role="status">页面已缓存，可以断网使用。任务保存在当前设备。</p>
