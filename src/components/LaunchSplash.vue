@@ -6,12 +6,13 @@ const visible = ref(document.documentElement.classList.contains('splash-pending'
 const closing = ref(false);
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const splashUrl = `${import.meta.env.BASE_URL}launch-splash.png`;
+const splashLoaded = ref(false);
 
 let finishTimer;
 let removeTimer;
 
 function finishSplash() {
-  if (!visible.value || closing.value) return;
+  if (!visible.value || closing.value || !splashLoaded.value) return;
 
   closing.value = true;
 
@@ -30,7 +31,9 @@ onMounted(() => {
     sessionStorage.setItem(storageKey, '1');
   } catch {}
 
-  finishTimer = window.setTimeout(finishSplash, reduceMotion ? 260 : 1980);
+  if (splashLoaded.value) {
+    finishTimer = window.setTimeout(finishSplash, reduceMotion ? 260 : 1980);
+  }
 });
 
 onBeforeUnmount(() => {
@@ -38,9 +41,24 @@ onBeforeUnmount(() => {
   window.clearTimeout(removeTimer);
   document.documentElement.classList.remove('splash-pending');
 });
+
+function handleLoad() {
+  splashLoaded.value = true;
+
+  finishTimer = window.setTimeout(
+      finishSplash,
+      reduceMotion ? 260 : 1980
+  );
+}
 </script>
 
 <template>
+  <img
+      :src="splashUrl"
+      style="display:none"
+      @load="handleLoad"
+  />
+
   <div
       v-if="visible"
       class="launch-splash"
