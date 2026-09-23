@@ -69,7 +69,7 @@ function exportTasks() {
 <template>
   <LaunchSplash />
   <main>
-    <header><span>PERSONAL WORKBENCH · 起步版</span><h1>我的工作台</h1><p>事情越干越多······</p></header>
+    <header><span>PERSONAL WORKBENCH · 起步版</span><h1>我的工作台</h1><p>欢迎回来，从哪里开始干活？</p></header>
     <p v-if="offlineReady" class="notice" role="status">页面已缓存，可以断网使用。任务保存在当前设备。</p>
     <div v-if="needRefresh" class="notice">有新版本可用。<button @click="updateServiceWorker()">更新应用</button></div>
     <form @submit.prevent="addTask">
