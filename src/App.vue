@@ -2,25 +2,24 @@
 import { ref, computed } from 'vue';
 import { useRegisterSW } from 'virtual:pwa-register/vue';
 import LaunchSplash from './components/LaunchSplash.vue';
+import { createTodo, emptyWorkbenchData, readWorkbenchData, toggleTodo, validateWorkbenchData, writeWorkbenchData } from './data/workbenchData.js';
 
-const storageKey = 'personal-workbench.tasks.v1';
-const tasks = ref([]);
+const workbenchData = ref(emptyWorkbenchData());
+const tasks = computed(() => workbenchData.value.items.filter(item => item.type === 'todo'));
 const title = ref('');//保存输入框当前的文字。
 const urgent = ref(false);//保存“急需处理”复选框是否勾选。
 const message = ref('');//保存需要展示给用户的错误提示
+const pendingImport = ref(null);
+const pendingFileName = ref('');
 const { offlineReady, needRefresh, updateServiceWorker } = useRegisterSW();
 
 // 浏览器保存的数据需要先校验，读取失败时不能悄悄覆盖旧数据。
 const storageReadable = ref(true);
 try {
-  const saved = JSON.parse(localStorage.getItem(storageKey) || '[]');
-  if (!Array.isArray(saved) || saved.some(task => !task || typeof task.id !== 'string' || typeof task.title !== 'string' || typeof task.done !== 'boolean' || typeof task.urgent !== 'boolean')) {
-    throw new Error('任务格式不正确');//排查到错误了直接跳下面的catch
-  }
-  tasks.value = saved;//正常情况下才会执行这个
-} catch {
+  workbenchData.value = readWorkbenchData();//正常情况下才会执行这个
+} catch (error) {
   storageReadable.value = false;
-  message.value = '本地数据读取失败，已暂停修改以保护原数据。';
+  message.value = error.message;
 }
 
 const groups = computed(() => [
@@ -34,8 +33,9 @@ const groups = computed(() => [
 function saveTasks(nextTasks) {//nextTasks是这个函数接收的参数
   if (!storageReadable.value) return false;
   try {
-    localStorage.setItem(storageKey, JSON.stringify(nextTasks));//把next转化成字符串格式然后保存到浏览器上面
-    tasks.value = nextTasks;//更新数据库（？）
+    const nextData = { ...workbenchData.value, items: nextTasks };
+    writeWorkbenchData(nextData);//把完整的 2.0 数据保存到浏览器上面
+    workbenchData.value = nextData;//保存成功后再更新页面
     message.value = '';
     return true;
   } catch {
@@ -47,22 +47,52 @@ function saveTasks(nextTasks) {//nextTasks是这个函数接收的参数
 //创建新任务task后，把新任务和旧任务（...tasks.value）一起丢给saveTasks保存到浏览器
 function addTask() {
   if (!title.value.trim()) { message.value = '请先填写任务标题。'; return; }//非空字符串在 JS 里算 true,trim()删掉了title.value两端的空格之后，再！判断是否ture
-  const task = { id: crypto.randomUUID(), title: title.value.trim(), urgent: urgent.value, done: false };
+  const task = createTodo(title.value.trim(), urgent.value);
   if (saveTasks([...tasks.value, task])) { title.value = ''; urgent.value = false; }//把旧，新任务丢上浏览器保存后清空输入框
 }
 
 //切换完成状态，id 是操作目标传进来的参数
 function toggleTask(id) {
-  saveTasks(tasks.value.map(task => task.id === id ? { ...task, done: !task.done } : task));
+  saveTasks(tasks.value.map(task => task.id === id ? toggleTodo(task) : task));
 }
-// { ...task, done: !task.done }展开task属性，后半段意思是把done属性置反再覆盖进task里面
+// { ...task }展开task属性；完成状态与完成时间一起改变。
 
 //导出任务备份
 function exportTasks() {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(tasks.value, null, 2)], { type: 'application/json' }));
+  if (!storageReadable.value) return;
+  const url = URL.createObjectURL(new Blob([JSON.stringify(workbenchData.value, null, 2)], { type: 'application/json' }));
   const link = document.createElement('a');
-  link.href = url; link.download = 'workbench-tasks.json'; link.click();
+  link.href = url; link.download = 'workbench-backup-v2.json'; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// 只在解析与校验全部通过后，才给出替换确认；选文件本身不会改动记录。
+async function chooseBackup(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  pendingImport.value = null;
+  if (!file) return;
+  if (!storageReadable.value) return;
+  try {
+    const data = JSON.parse(await file.text());
+    pendingImport.value = validateWorkbenchData(data);
+    pendingFileName.value = file.name;
+    message.value = '';
+  } catch (error) {
+    message.value = error instanceof SyntaxError ? '文件不是有效的 JSON 备份。' : error.message;
+  }
+}
+
+function confirmImport() {
+  if (!storageReadable.value || !pendingImport.value) return;
+  try {
+    writeWorkbenchData(pendingImport.value);
+    workbenchData.value = pendingImport.value;
+    pendingImport.value = null;
+    message.value = '备份导入成功，当前记录已替换。';
+  } catch {
+    message.value = '导入未完成：浏览器保存失败，原记录保留。请检查本地存储是否可用。';
+  }
 }
 </script>
 
@@ -86,6 +116,18 @@ function exportTasks() {
         <span>{{ task.title }}</span>
       </label>
     </section>
-    <footer><button class="secondary" @click="exportTasks">导出任务备份</button><p>数据仅保存在当前浏览器，尚未云端同步。清除网站数据会删除本地记录，请定期导出。</p></footer>
+    <footer>
+      <button class="secondary" :disabled="!storageReadable" @click="exportTasks">导出任务备份</button>
+      <label class="backup-label" for="backup-file">导入备份（JSON 文件）</label>
+      <input id="backup-file" type="file" accept=".json,application/json" :disabled="!storageReadable" @change="chooseBackup">
+      <p>导入会替换当前全部记录，请先导出当前备份。备份仅在当前设备／浏览器处理，不涉及云同步。清除网站数据会删除本地记录。</p>
+      <div v-if="pendingImport" class="import-confirm" role="alert">
+        <p>“{{ pendingFileName }}”校验通过：将用 {{ pendingImport.items.length }} 条记录替换当前 {{ tasks.length }} 条记录。确定导入吗？</p>
+        <div class="import-actions">
+          <button @click="confirmImport">确认替换</button>
+          <button class="secondary" @click="pendingImport = null">取消</button>
+        </div>
+      </div>
+    </footer>
   </main>
 </template>

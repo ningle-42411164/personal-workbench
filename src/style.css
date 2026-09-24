@@ -20,3 +20,7 @@ small { font-weight: normal; color: #748079; margin-left: 8px; }
 .error { color: #a52d2d; }
 footer { margin-top: 28px; font-size: 13px; line-height: 1.7; }
 .secondary { background: #e4e9e3; color: #244d43; }
+.backup-label { display: block; margin-top: 18px; font-size: 14px; font-weight: 600; }
+.import-confirm { margin-top: 16px; padding: 16px; border: 1px solid #a8b9af; border-radius: 10px; background: #fff; }
+.import-confirm p { margin-top: 0; color: #243d36; }
+.import-actions { display: flex; flex-wrap: wrap; gap: 10px; }
