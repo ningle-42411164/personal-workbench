@@ -10,6 +10,30 @@ function isTimestamp(value) {
     new Date(value).toISOString() === value;
 }
 
+export function isCalendarDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  if (year < 1) return false;
+  const date = utcCalendarDay(year, month, day);
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+function utcCalendarDay(year, month, day) {
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(0, 0, 0, 0);
+  return date;
+}
+
+// 只取本地年月日，再用 UTC 日历序号相减，避免夏令时造成 23/25 小时的误差。
+export function daysUntil(targetDate, now = new Date()) {
+  if (!isCalendarDate(targetDate)) throw new Error('目标日期格式不正确。');
+  const [year, month, day] = targetDate.split('-').map(Number);
+  const targetDay = utcCalendarDay(year, month, day).getTime();
+  const currentDay = utcCalendarDay(now.getFullYear(), now.getMonth() + 1, now.getDate()).getTime();
+  return Math.round((targetDay - currentDay) / 86400000);
+}
+
 // 导入和读取共用一套校验；不修补缺失字段，也不替用户编造日期。
 export function validateWorkbenchData(data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
@@ -25,15 +49,22 @@ export function validateWorkbenchData(data) {
   const ids = new Set();
   data.items.forEach((item, index) => {
     const position = `第 ${index + 1} 条事项`;
-    if (!item || typeof item !== 'object' || Array.isArray(item) || item.type !== 'todo' ||
+    if (!item || typeof item !== 'object' || Array.isArray(item) ||
+        !['todo', 'note', 'routine', 'importantDate'].includes(item.type) ||
         typeof item.id !== 'string' || !item.id.trim() ||
         typeof item.title !== 'string' || !item.title.trim() || item.title.length > 150 ||
         !Array.isArray(item.tags) || item.tags.some(tag => typeof tag !== 'string') ||
-        !isTimestamp(item.createdAt) || !isTimestamp(item.updatedAt) ||
-        typeof item.urgent !== 'boolean' || typeof item.done !== 'boolean' ||
-        !(item.completedAt === null || isTimestamp(item.completedAt)) ||
-        (item.done && item.completedAt === null) || (!item.done && item.completedAt !== null)) {
+        !isTimestamp(item.createdAt) || !isTimestamp(item.updatedAt)) {
       throw new Error(`${position}格式不正确，请检查类型、标题、标签、时间和完成状态。`);
+    }
+    if (item.type === 'todo' &&
+        (typeof item.urgent !== 'boolean' || typeof item.done !== 'boolean' ||
+         !(item.completedAt === null || isTimestamp(item.completedAt)) ||
+         (item.done && item.completedAt === null) || (!item.done && item.completedAt !== null))) {
+      throw new Error(`${position}的待办完成状态或时间格式不正确。`);
+    }
+    if (item.type === 'importantDate' && !isCalendarDate(item.targetDate)) {
+      throw new Error(`${position}的目标日期不正确。`);
     }
     if (ids.has(item.id)) {
       throw new Error(`备份中存在重复 ID：${item.id}`);
@@ -60,18 +91,40 @@ export function writeWorkbenchData(data, storage = localStorage) {
   storage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
 
-export function createTodo(title, urgent, now = new Date().toISOString()) {
+function createBaseItem(type, title, now) {
   return {
     id: crypto.randomUUID(),
-    type: 'todo',
+    type,
     title,
     tags: [],
     createdAt: now,
     updatedAt: now,
+  };
+}
+
+export function createTodo(title, urgent, now = new Date().toISOString()) {
+  return {
+    ...createBaseItem('todo', title, now),
     urgent,
     done: false,
     completedAt: null,
   };
+}
+
+export function createNote(title, now = new Date().toISOString()) {
+  return createBaseItem('note', title, now);
+}
+
+export function createRoutine(title, now = new Date().toISOString()) {
+  return createBaseItem('routine', title, now);
+}
+
+export function createImportantDate(title, targetDate, now = new Date().toISOString()) {
+  return { ...createBaseItem('importantDate', title, now), targetDate };
+}
+
+export function renameItem(item, title, now = new Date().toISOString()) {
+  return { ...item, title, updatedAt: now };
 }
 
 export function toggleTodo(todo, now = new Date().toISOString()) {
