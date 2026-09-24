@@ -1,12 +1,12 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue';
-
+//这一堆就是管入场动画的
 const storageKey = 'personal-workbench.splash.seen.v1';
-const visible = ref(document.documentElement.classList.contains('splash-pending'));
-const closing = ref(false);
-const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-const splashUrl = `${import.meta.env.BASE_URL}launch-splash.webp`;
-const splashLoaded = ref(false);
+const visible = ref(document.documentElement.classList.contains('splash-pending'));//启动页是否需要启动，相当于检查<html class="splash-pending">是否存在
+const closing = ref(false);//是否开始关闭入场动画
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;//检查用户设备是否开启“减少动画”
+const splashUrl = `${import.meta.env.BASE_URL}launch-splash.webp`;//图片地址
+const splashLoaded = ref(false);//启动图片有没有加载完成
 
 let finishTimer;
 let removeTimer;

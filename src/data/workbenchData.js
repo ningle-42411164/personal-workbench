@@ -1,5 +1,7 @@
 export const STORAGE_KEY = 'personal-workbench.data.v2';
 export const SCHEMA_VERSION = 2;
+const SIMPLE_TYPES = ['project', 'shopping', 'waiting', 'creation'];
+const CONVERSION_TYPES = ['todo', 'project', 'importantDate', ...SIMPLE_TYPES.filter(type => type !== 'project')];
 
 export function emptyWorkbenchData() {
   return { schemaVersion: SCHEMA_VERSION, items: [] };
@@ -50,7 +52,7 @@ export function validateWorkbenchData(data) {
   data.items.forEach((item, index) => {
     const position = `第 ${index + 1} 条事项`;
     if (!item || typeof item !== 'object' || Array.isArray(item) ||
-        !['todo', 'note', 'routine', 'importantDate'].includes(item.type) ||
+        !['todo', 'note', 'routine', 'importantDate', ...SIMPLE_TYPES].includes(item.type) ||
         typeof item.id !== 'string' || !item.id.trim() ||
         typeof item.title !== 'string' || !item.title.trim() || item.title.length > 150 ||
         !Array.isArray(item.tags) || item.tags.some(tag => typeof tag !== 'string') ||
@@ -66,11 +68,30 @@ export function validateWorkbenchData(data) {
     if (item.type === 'importantDate' && !isCalendarDate(item.targetDate)) {
       throw new Error(`${position}的目标日期不正确。`);
     }
+    if (item.type === 'routine' && item.remark !== undefined && typeof item.remark !== 'string') {
+      throw new Error(`${position}的日常持续备注格式不正确。`);
+    }
+    if (item.type === 'note') {
+      const conversionFields = [item.convertedToId, item.convertedToType, item.convertedAt];
+      if (conversionFields.some(value => value !== undefined) &&
+          (typeof item.convertedToId !== 'string' || !item.convertedToId.trim() ||
+           !CONVERSION_TYPES.includes(item.convertedToType) || !isTimestamp(item.convertedAt))) {
+        throw new Error(`${position}的随笔转换信息不完整。`);
+      }
+    }
     if (ids.has(item.id)) {
       throw new Error(`备份中存在重复 ID：${item.id}`);
     }
     ids.add(item.id);
   });
+  for (const item of data.items) {
+    if (item.type === 'note' && item.convertedToId) {
+      const target = data.items.find(candidate => candidate.id === item.convertedToId);
+      if (!target || target.type !== item.convertedToType) {
+        throw new Error(`随笔“${item.title}”的已录入目标不存在或类型不一致。`);
+      }
+    }
+  }
   return data;
 }
 
@@ -121,6 +142,27 @@ export function createRoutine(title, now = new Date().toISOString()) {
 
 export function createImportantDate(title, targetDate, now = new Date().toISOString()) {
   return { ...createBaseItem('importantDate', title, now), targetDate };
+}
+
+export function createSimpleItem(type, title, now = new Date().toISOString()) {
+  if (!SIMPLE_TYPES.includes(type)) throw new Error('不支持此事项分类。');
+  return createBaseItem(type, title, now);
+}
+
+// 转换保留原随笔，并同时生成一个新事项；页面只需将返回数组保存一次。
+export function convertNote(items, noteId, targetType, targetDate, now = new Date().toISOString()) {
+  const note = items.find(item => item.id === noteId && item.type === 'note');
+  if (!note || note.convertedToId) throw new Error('这条随笔已录入，不能重复转换。');
+  if (!CONVERSION_TYPES.includes(targetType)) throw new Error('请选择有效的目标分类。');
+  if (targetType === 'importantDate' && !isCalendarDate(targetDate)) {
+    throw new Error('请先选择有效的目标日期。');
+  }
+  const target = targetType === 'todo' ? createTodo(note.title, false, now)
+    : targetType === 'importantDate' ? createImportantDate(note.title, targetDate, now)
+      : createSimpleItem(targetType, note.title, now);
+  return [...items.map(item => item.id === noteId ? {
+    ...item, updatedAt: now, convertedToId: target.id, convertedToType: targetType, convertedAt: now,
+  } : item), target];
 }
 
 export function renameItem(item, title, now = new Date().toISOString()) {
