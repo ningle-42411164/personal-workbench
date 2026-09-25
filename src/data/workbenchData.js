@@ -68,8 +68,25 @@ export function validateWorkbenchData(data) {
     if (item.type === 'importantDate' && !isCalendarDate(item.targetDate)) {
       throw new Error(`${position}的目标日期不正确。`);
     }
-    if (item.type === 'routine' && item.remark !== undefined && typeof item.remark !== 'string') {
-      throw new Error(`${position}的日常持续备注格式不正确。`);
+    if (item.priority !== undefined && typeof item.priority !== 'boolean') {
+      throw new Error(`${position}的优先处理状态不正确。`);
+    }
+    if (item.type === 'project') {
+      if ((item.status !== undefined && !['active', 'paused', 'done'].includes(item.status)) ||
+          (item.startDate !== undefined && item.startDate !== null && !isCalendarDate(item.startDate)) ||
+          (item.dueDate !== undefined && item.dueDate !== null && !isCalendarDate(item.dueDate)) ||
+          (item.currentSituation !== undefined && typeof item.currentSituation !== 'string') ||
+          (item.nextStep !== undefined && typeof item.nextStep !== 'string') ||
+          (item.completedAt !== undefined && item.completedAt !== null && !isTimestamp(item.completedAt)) ||
+          (item.status === 'done' && !isTimestamp(item.completedAt)) ||
+          (item.status !== 'done' && item.completedAt != null) ||
+          (item.updates !== undefined && (!Array.isArray(item.updates) || item.updates.some(update =>
+            !update || typeof update !== 'object' || Array.isArray(update) ||
+            typeof update.id !== 'string' || !update.id.trim() ||
+            typeof update.content !== 'string' || !isTimestamp(update.createdAt)) ||
+            new Set(item.updates.map(update => update.id)).size !== item.updates.length))) {
+        throw new Error(`${position}的项目详情或更新记录格式不正确。`);
+      }
     }
     if (item.type === 'note') {
       const conversionFields = [item.convertedToId, item.convertedToType, item.convertedAt];
@@ -140,13 +157,63 @@ export function createRoutine(title, now = new Date().toISOString()) {
   return createBaseItem('routine', title, now);
 }
 
-export function createImportantDate(title, targetDate, now = new Date().toISOString()) {
-  return { ...createBaseItem('importantDate', title, now), targetDate };
+export function createImportantDate(title, targetDate, now = new Date().toISOString(), priority = false) {
+  return { ...createBaseItem('importantDate', title, now), targetDate, priority };
 }
 
-export function createSimpleItem(type, title, now = new Date().toISOString()) {
+export function createSimpleItem(type, title, now = new Date().toISOString(), priority = false) {
   if (!SIMPLE_TYPES.includes(type)) throw new Error('不支持此事项分类。');
-  return createBaseItem(type, title, now);
+  const item = { ...createBaseItem(type, title, now), priority };
+  return type === 'project' ? {
+    ...item, status: 'active', startDate: null, dueDate: null,
+    currentSituation: '', nextStep: '', updates: [], completedAt: null,
+  } : item;
+}
+
+// 旧项目可以没有详情字段；只在用户实际编辑时补齐，不改写原有备份。
+export function projectEditableFields(project) {
+  if (project.type !== 'project') throw new Error('这不是项目事项。');
+  return {
+    title: project.title, tags: project.tags, status: project.status ?? 'active',
+    startDate: project.startDate ?? null, dueDate: project.dueDate ?? null,
+    currentSituation: project.currentSituation ?? '', nextStep: project.nextStep ?? '',
+  };
+}
+
+export function parseProjectTags(text) {
+  return [...new Set(text.split(/[\s,，]+/).map(tag => tag.replace(/^#+/, '').trim()).filter(Boolean))];
+}
+
+export function updateProject(project, fields, now = new Date().toISOString()) {
+  const before = projectEditableFields(project);
+  const next = {
+    title: fields.title.trim(), tags: fields.tags, status: fields.status,
+    startDate: fields.startDate || null, dueDate: fields.dueDate || null,
+    currentSituation: fields.currentSituation, nextStep: fields.nextStep,
+  };
+  if (!next.title || next.title.length > 150 || !Array.isArray(next.tags) ||
+      next.tags.some(tag => typeof tag !== 'string' || !tag.trim()) ||
+      !['active', 'paused', 'done'].includes(next.status) ||
+      (next.startDate !== null && !isCalendarDate(next.startDate)) ||
+      (next.dueDate !== null && !isCalendarDate(next.dueDate))) {
+    throw new Error('请检查项目名称、状态、标签和日期。');
+  }
+  const changed = Object.keys(next).some(key => key === 'tags'
+    ? next.tags.length !== before.tags.length || next.tags.some((tag, index) => tag !== before.tags[index])
+    : next[key] !== before[key]);
+  if (!changed) return project;
+
+  const updates = project.updates ?? [];
+  const situationChanged = next.currentSituation !== before.currentSituation;
+  return {
+    ...project, ...next, updatedAt: now,
+    completedAt: next.status === 'done' ? (before.status === 'done' ? project.completedAt : now) : null,
+    updates: situationChanged ? [...updates, { id: crypto.randomUUID(), content: next.currentSituation, createdAt: now }] : updates,
+  };
+}
+
+export function comparePriorityThenNewest(a, b) {
+  return Number(Boolean(b.priority)) - Number(Boolean(a.priority)) || b.createdAt.localeCompare(a.createdAt);
 }
 
 // 转换保留原随笔，并同时生成一个新事项；页面只需将返回数组保存一次。
@@ -163,6 +230,16 @@ export function convertNote(items, noteId, targetType, targetDate, now = new Dat
   return [...items.map(item => item.id === noteId ? {
     ...item, updatedAt: now, convertedToId: target.id, convertedToType: targetType, convertedAt: now,
   } : item), target];
+}
+
+// 删除转换目标时只解除原随笔的关联；随笔和其他事项都保持原样。
+export function removeItem(items, id, now = new Date().toISOString()) {
+  if (!items.some(item => item.id === id)) throw new Error('要删除的事项不存在。');
+  return items.filter(item => item.id !== id).map(item => {
+    if (item.type !== 'note' || item.convertedToId !== id) return item;
+    const { convertedToId, convertedToType, convertedAt, ...originalNote } = item;
+    return { ...originalNote, updatedAt: now };
+  });
 }
 
 export function renameItem(item, title, now = new Date().toISOString()) {
