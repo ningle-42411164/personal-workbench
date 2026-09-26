@@ -26,6 +26,9 @@ input:focus, select:focus { border-color: #244d43; }
 .more-toggle { margin: 0; font-size: 13px; white-space: nowrap; }
 .more-options { margin-top: 8px; padding: 12px; border-radius: 10px; background: #f5f7f3; font-size: 13px; }
 .more-options label { display: block; margin-top: 8px; }
+.quick-type-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.quick-type-options button { padding: 7px 10px; background: #e4e9e3; color: #244d43; font-size: 13px; }
+.quick-type-options button[aria-pressed=true] { background: #244d43; color: white; }
 .routine-strip { margin-top: 12px; padding: 0 2px; }
 .routine-strip-head { display: flex; align-items: center; gap: 8px; min-height: 36px; }
 .routine-chips { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
@@ -41,6 +44,12 @@ input:focus, select:focus { border-color: #244d43; }
 .form-buttons { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .form-buttons button:not(.text-button) { min-height: 40px; padding: 8px 16px; border-radius: 8px; }
 .detail-actions { display: flex; justify-content: flex-end; min-width: 0; margin-top: 6px; }
+.ordinary-item .detail-actions { gap: 8px; }
+.edit-button { padding: 5px 10px; border-radius: 7px; font-size: 12px; line-height: 1.35; }
+.ordinary-name-editor { min-width: 0; }
+.ordinary-item.converted-note .todo-title { color: #84918a; }
+.project-tag-picker .project-choice-list label, [aria-label="用户标签选项"] label { padding: 5px 8px; border-radius: 8px; background: #e4e9e3; color: #526a5c; }
+.project-choice-list input[type=checkbox] { width: 18px; height: 18px; }
 .section-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
 .date-form { margin: 12px 0 18px; }
 .date-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 14px; }
@@ -75,14 +84,18 @@ input:focus, select:focus { border-color: #244d43; }
 .completed-project { border-left: 2px solid #cbd8ce; padding-left: 12px; }
 .completed-project > .item-line .category-title { color: #65766e; }
 .project-detail { min-width: 0; margin-top: 12px; padding: 14px; border: 1px solid #dfe5df; border-radius: 10px; background: #f8faf7; font-size: 13px; overflow-wrap: anywhere; }
-.project-fields p { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px; margin: 0; padding: 7px 0; border-bottom: 1px solid #e7ede7; white-space: pre-wrap; }
-.project-fields strong { color: #526a5c; font-weight: 600; }
+.project-list-trigger { min-height: 36px; }
+.category-row .project-next-step { min-height: 20px; margin: 0; color: #65766e; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+.project-field-row { display: grid; grid-template-columns: 100px minmax(0, 1fr) 28px; align-items: start; gap: 8px; padding: 7px 0; border-bottom: 1px solid #e7ede7; }
+.project-field-label { grid-column: 1; padding: 5px 0; background: transparent; color: #526a5c; font-size: 13px; font-weight: 600; text-align: left; text-decoration: underline; text-underline-offset: 3px; }
+.project-field-value { grid-column: 2; min-width: 0; padding: 5px 0; background: transparent; color: inherit; font-size: 13px; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; }
+.project-close { grid-column: 3; grid-row: 1; width: 28px; height: 28px; padding: 0; background: transparent; color: #65766e; font-size: 20px; }
+.project-field-editor { grid-column: 2 / -1; min-width: 0; }
 .project-fields time, .project-history time, .project-field-hint { color: #748079; font-size: 12px; font-weight: 400; }
 .project-history { margin-top: 16px; }
 .project-history h3 { margin: 0 0 8px; font-size: 14px; }
 .project-history ol { margin: 0; padding-left: 22px; }
-.project-history li { padding: 5px 0; }
-.project-history li p { margin: 3px 0; white-space: pre-wrap; }
+.project-history li { padding: 5px 0; white-space: pre-wrap; }
 .project-edit label { display: block; margin-bottom: 10px; color: #526a5c; font-weight: 600; }
 .project-edit input, .project-edit select { margin: 5px 0 0; font-weight: 400; }
 .project-edit textarea { display: block; width: 100%; min-height: 76px; margin-top: 5px; padding: 10px; border: 1px solid #a8b9af; border-radius: 8px; background: white; color: #243d36; font: inherit; font-weight: 400; resize: vertical; }
@@ -90,6 +103,11 @@ input:focus, select:focus { border-color: #244d43; }
 .project-edit textarea:focus-visible { outline: 3px solid #244d43; outline-offset: 3px; }
 .project-date-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .project-detail .form-buttons { gap: 8px; }
+.project-choice-list { display: flex; flex-wrap: wrap; gap: 8px 12px; }
+.project-edit .project-choice-list label { display: inline-flex; align-items: center; gap: 5px; min-height: 36px; margin: 0; font-weight: 400; overflow-wrap: anywhere; }
+.project-choice-list input[type=radio] { display: inline-block; flex-shrink: 0; width: 18px; height: 18px; margin: 0; padding: 0; accent-color: #244d43; }
+.project-tag-picker { min-width: 0; margin: 0 0 10px; padding: 8px; border: 1px solid #dfe5df; border-radius: 8px; }
+.project-tag-picker legend { color: #526a5c; font-weight: 600; }
 button.category-title:hover { text-decoration: underline; text-underline-offset: 3px; }
 .converted-note .category-title { color: #84918a; }
 .note-struck { text-decoration: line-through; }
@@ -113,5 +131,7 @@ footer { margin-top: 28px; font-size: 13px; line-height: 1.7; }
   .todo-status { grid-column: 2; }
   header h1 { font-size: 32px; }
   .project-date-fields { grid-template-columns: 1fr; gap: 0; }
-  .project-fields p { grid-template-columns: 1fr; gap: 2px; }
+  .project-field-row { grid-template-columns: minmax(0, 1fr) 28px; gap: 2px 8px; }
+  .project-field-value, .project-field-editor { grid-column: 1 / -1; }
+  .project-close { grid-column: 2; }
 }

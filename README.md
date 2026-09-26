@@ -1,28 +1,61 @@
-# 我的工作台：第一课
+# Personal Workbench
 
-Vue 3 + JavaScript + Vite + PWA。此版本只练习添加任务、完成任务与本地保存。Router、Pinia和组件拆分将在后续课程加入，避免一次引入过多概念。
+A lightweight personal workspace for everyday items and projects, with a Chinese-language interface and browser-local storage.
 
-## 启动
+[Try it online](https://ningle-42411164.github.io/personal-workbench/)
 
-安装 Node.js LTS（包含 npm）后，在本目录运行 `npm install`，然后 `npm run dev`。
-构建：`npm run build`。验证离线版本：`npm run preview`，在本机通过 localhost 打开。开发模式不用于验证离线缓存。
+## Features
 
-## 文件阅读顺序
+- **Quick capture:** save a note by default, check "Needs handling" to create a to-do, or explicitly choose a supported item type. Priority items stay in their selected category.
+- **Categories:** one-off to-dos, notes, waiting items, entertainment/creative items, shopping, and projects. Lists support expandable previews.
+- **Everyday reminders and important dates:** compact name-only reminders and date cards with days remaining or elapsed, calculated from the local calendar date.
+- **Item actions:** complete and restore to-dos, notes, waiting items, entertainment/creative items, and shopping without changing their original category. Expand an item to see its creation time, edit its name, or delete it with confirmation.
+- **Note conversion:** turn a note into a formal item while keeping the original note marked as recorded; the same note cannot be converted repeatedly.
+- **Projects:** quick or full creation, field-by-field editing, status, optional user tags, start and due dates, current situation, and next step. Creation adds one history entry; subsequent changes to the current situation append timestamped updates. Completed projects retain their details and history.
+- **User tags:** projects can have no tags, one tag, or multiple tags. Twelve default choices are available independently of existing items and are combined with tags already saved in the data. User tags are separate from system priority indicators.
+- **JSON backups:** export the complete versioned data, or import a validated backup after confirming replacement of all current records. Import does not merge records.
+- **PWA support:** local resource caching, update notifications, app icons, and a skippable launch screen shown once per browser session, with reduced-motion support.
 
-1. src/main.js：把应用放入网页。
-2. src/App.vue：上半部分保存数据、定义函数，下半部分显示界面。
-3. src/style.css：外观和手机布局。
-4. vite.config.js：构建时生成离线缓存及安装信息。
+## Stack
 
-## 离线与发布
+Vue 3, JavaScript, Vite, and `vite-plugin-pwa`. Records are stored in `localStorage` under `personal-workbench.data.v2`, using `schemaVersion: 2` and one `items` collection. The launch screen uses `sessionStorage` for its session flag.
 
-首次使用需要联网加载完整页面，等待“页面已缓存”提示，然后刷新确认服务工作线程已控制页面。此后可断网查看、添加和完成任务。手机必须从 HTTPS 地址访问，不能用普通局域网 HTTP 地址验证 PWA。
+There is no backend, account system, or automatic cloud synchronization.
 
-尚未部署到 VPS，也没有云同步。浏览器可能清理本地数据；请使用导出备份。当前仅包含 SVG 图标，手机安装兼容性还需补充 PNG 图标并在真实设备验证。离线并非永不丢失数据。
+## Local development
 
-## 参考
+Use Node.js 24 and npm. From the project directory:
 
-- https://github.com/vuejs/create-vue
-- https://github.com/vite-pwa/vite-plugin-pwa
+```sh
+npm ci
+npm run dev
+```
 
-下一课：逐行解释输入框如何通过 v-model 保存标题，以及 addTask 如何新增任务。
+Open the address printed by Vite, including the `/personal-workbench/` path (normally `http://localhost:5173/personal-workbench/`).
+
+Build and preview the production version:
+
+```sh
+npm run build
+npm run preview
+```
+
+The preview address is normally `http://localhost:4173/personal-workbench/`. Production output is written to `dist/`. Use the production preview, rather than the development server, to check PWA caching.
+
+Run the data tests:
+
+```sh
+node --test tests/workbenchData.test.js
+```
+
+On Windows, use `npm.cmd` if PowerShell blocks `npm.ps1`.
+
+## Data and offline limits
+
+Records belong to the current browser on the current device and site address. Other browsers, devices, and local preview addresses do not automatically share or synchronize them. Clearing browser/site data or browser-managed storage cleanup can remove records. Export backups regularly, especially before importing a replacement backup.
+
+The first visit and initial resource caching require an internet connection. Offline use is available only after caching is ready; the page displays a readiness message when this occurs. Cached resources and local records are not guaranteed to remain available forever. Installation and offline behavior should be checked on the actual device and browser; support is not guaranteed for every phone or tablet.
+
+## Deployment
+
+GitHub Pages hosts the app at [https://ningle-42411164.github.io/personal-workbench/](https://ningle-42411164.github.io/personal-workbench/). The existing workflow in `.github/workflows/deploy-pages.yml` builds and deploys the site on pushes to `main`. The Vite base and PWA scope use `/personal-workbench/`.

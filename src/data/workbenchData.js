@@ -1,6 +1,7 @@
 export const STORAGE_KEY = 'personal-workbench.data.v2';
 export const SCHEMA_VERSION = 2;
 const SIMPLE_TYPES = ['project', 'shopping', 'waiting', 'creation'];
+export const COMPLETABLE_TYPES = ['todo', 'note', 'waiting', 'creation', 'shopping'];
 const CONVERSION_TYPES = ['todo', 'project', 'importantDate', ...SIMPLE_TYPES.filter(type => type !== 'project')];
 
 export function emptyWorkbenchData() {
@@ -54,7 +55,7 @@ export function validateWorkbenchData(data) {
     if (!item || typeof item !== 'object' || Array.isArray(item) ||
         !['todo', 'note', 'routine', 'importantDate', ...SIMPLE_TYPES].includes(item.type) ||
         typeof item.id !== 'string' || !item.id.trim() ||
-        typeof item.title !== 'string' || !item.title.trim() || item.title.length > 150 ||
+        typeof item.title !== 'string' || (item.type !== 'project' && !item.title.trim()) || item.title.length > 150 ||
         !Array.isArray(item.tags) || item.tags.some(tag => typeof tag !== 'string') ||
         !isTimestamp(item.createdAt) || !isTimestamp(item.updatedAt)) {
       throw new Error(`${position}格式不正确，请检查类型、标题、标签、时间和完成状态。`);
@@ -65,6 +66,14 @@ export function validateWorkbenchData(data) {
          (item.done && item.completedAt === null) || (!item.done && item.completedAt !== null))) {
       throw new Error(`${position}的待办完成状态或时间格式不正确。`);
     }
+    // 旧的四类记录可以没有完成字段；一旦保存了状态，就校验状态与时间的一致性。
+    if (COMPLETABLE_TYPES.includes(item.type) && item.type !== 'todo' &&
+        (item.done !== undefined || item.completedAt !== undefined) &&
+        (typeof item.done !== 'boolean' ||
+         !(item.completedAt === null || isTimestamp(item.completedAt)) ||
+         (item.done && item.completedAt === null) || (!item.done && item.completedAt !== null))) {
+      throw new Error(`${position}的完成状态或时间格式不正确。`);
+    }
     if (item.type === 'importantDate' && !isCalendarDate(item.targetDate)) {
       throw new Error(`${position}的目标日期不正确。`);
     }
@@ -72,7 +81,7 @@ export function validateWorkbenchData(data) {
       throw new Error(`${position}的优先处理状态不正确。`);
     }
     if (item.type === 'project') {
-      if ((item.status !== undefined && !['active', 'paused', 'done'].includes(item.status)) ||
+      if ((item.status != null && !['active', 'paused', 'done'].includes(item.status)) ||
           (item.startDate !== undefined && item.startDate !== null && !isCalendarDate(item.startDate)) ||
           (item.dueDate !== undefined && item.dueDate !== null && !isCalendarDate(item.dueDate)) ||
           (item.currentSituation !== undefined && typeof item.currentSituation !== 'string') ||
@@ -150,7 +159,7 @@ export function createTodo(title, urgent, now = new Date().toISOString()) {
 }
 
 export function createNote(title, now = new Date().toISOString()) {
-  return createBaseItem('note', title, now);
+  return { ...createBaseItem('note', title, now), done: false, completedAt: null };
 }
 
 export function createRoutine(title, now = new Date().toISOString()) {
@@ -163,18 +172,32 @@ export function createImportantDate(title, targetDate, now = new Date().toISOStr
 
 export function createSimpleItem(type, title, now = new Date().toISOString(), priority = false) {
   if (!SIMPLE_TYPES.includes(type)) throw new Error('不支持此事项分类。');
-  const item = { ...createBaseItem(type, title, now), priority };
-  return type === 'project' ? {
-    ...item, status: 'active', startDate: null, dueDate: null,
-    currentSituation: '', nextStep: '', updates: [], completedAt: null,
-  } : item;
+  return type === 'project' ? createProject(title, {}, now, priority)
+    : { ...createBaseItem(type, title, now), priority, done: false, completedAt: null };
+}
+
+// 创建记录只在这个入口生成；读取和导入不补写，也不替空字段编造内容。
+export function createProject(title = '', fields = {}, now = new Date().toISOString(), priority = false) {
+  const project = {
+    ...createBaseItem('project', title.trim() || '未命名项目', now), priority,
+    updates: [{ id: crypto.randomUUID(), content: '创建此项目', createdAt: now }],
+  };
+  for (const key of ['tags', 'status', 'startDate', 'dueDate', 'currentSituation', 'nextStep']) {
+    if (Object.hasOwn(fields, key)) project[key] = fields[key];
+  }
+  if (project.status === '') project.status = null;
+  if (project.startDate === '') project.startDate = null;
+  if (project.dueDate === '') project.dueDate = null;
+  if (project.status === 'done') project.completedAt = now;
+  validateWorkbenchData({ schemaVersion: SCHEMA_VERSION, items: [project] });
+  return project;
 }
 
 // 旧项目可以没有详情字段；只在用户实际编辑时补齐，不改写原有备份。
 export function projectEditableFields(project) {
   if (project.type !== 'project') throw new Error('这不是项目事项。');
   return {
-    title: project.title, tags: project.tags, status: project.status ?? 'active',
+    title: project.title, tags: project.tags, status: project.status ?? null,
     startDate: project.startDate ?? null, dueDate: project.dueDate ?? null,
     currentSituation: project.currentSituation ?? '', nextStep: project.nextStep ?? '',
   };
@@ -186,30 +209,33 @@ export function parseProjectTags(text) {
 
 export function updateProject(project, fields, now = new Date().toISOString()) {
   const before = projectEditableFields(project);
-  const next = {
-    title: fields.title.trim(), tags: fields.tags, status: fields.status,
-    startDate: fields.startDate || null, dueDate: fields.dueDate || null,
-    currentSituation: fields.currentSituation, nextStep: fields.nextStep,
-  };
-  if (!next.title || next.title.length > 150 || !Array.isArray(next.tags) ||
+  const next = { ...before, ...fields };
+  if (Object.hasOwn(fields, 'title')) next.title = next.title.trim();
+  next.status = next.status || null;
+  next.startDate = next.startDate || null;
+  next.dueDate = next.dueDate || null;
+  if (next.title.length > 150 || !Array.isArray(next.tags) ||
       next.tags.some(tag => typeof tag !== 'string' || !tag.trim()) ||
-      !['active', 'paused', 'done'].includes(next.status) ||
+      (next.status !== null && !['active', 'paused', 'done'].includes(next.status)) ||
+      typeof next.currentSituation !== 'string' || typeof next.nextStep !== 'string' ||
       (next.startDate !== null && !isCalendarDate(next.startDate)) ||
       (next.dueDate !== null && !isCalendarDate(next.dueDate))) {
     throw new Error('请检查项目名称、状态、标签和日期。');
   }
-  const changed = Object.keys(next).some(key => key === 'tags'
+  const changedKeys = Object.keys(before).filter(key => key === 'tags'
     ? next.tags.length !== before.tags.length || next.tags.some((tag, index) => tag !== before.tags[index])
     : next[key] !== before[key]);
-  if (!changed) return project;
+  if (!changedKeys.length) return project;
 
-  const updates = project.updates ?? [];
-  const situationChanged = next.currentSituation !== before.currentSituation;
-  return {
-    ...project, ...next, updatedAt: now,
-    completedAt: next.status === 'done' ? (before.status === 'done' ? project.completedAt : now) : null,
-    updates: situationChanged ? [...updates, { id: crypto.randomUUID(), content: next.currentSituation, createdAt: now }] : updates,
-  };
+  // 逐字段保存只写实际变化的字段，未设置的其他详情仍保持未设置。
+  const result = { ...project, updatedAt: now };
+  changedKeys.forEach(key => { result[key] = next[key]; });
+  if (changedKeys.includes('status')) result.completedAt = next.status === 'done' ? now : null;
+  if (changedKeys.includes('currentSituation')) {
+    result.updates = [...(project.updates ?? []), { id: crypto.randomUUID(), content: next.currentSituation, createdAt: now }];
+  }
+  validateWorkbenchData({ schemaVersion: SCHEMA_VERSION, items: [result] });
+  return result;
 }
 
 export function comparePriorityThenNewest(a, b) {
@@ -247,6 +273,7 @@ export function renameItem(item, title, now = new Date().toISOString()) {
 }
 
 export function toggleTodo(todo, now = new Date().toISOString()) {
+  if (!COMPLETABLE_TYPES.includes(todo.type)) throw new Error('此分类不使用勾选完成。');
   const done = !todo.done;
   return { ...todo, done, updatedAt: now, completedAt: done ? now : null };
 }

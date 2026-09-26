@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { availableUserTags, DEFAULT_USER_TAGS, normalizeUserTags } from '../src/data/userTags.js';
 import {
-  STORAGE_KEY, comparePriorityThenNewest, convertNote, createImportantDate, createNote, createRoutine, createSimpleItem, createTodo, daysUntil,
+  STORAGE_KEY, comparePriorityThenNewest, convertNote, createImportantDate, createNote, createProject, createRoutine, createSimpleItem, createTodo, daysUntil,
   emptyWorkbenchData, parseProjectTags, projectEditableFields, readWorkbenchData, removeItem, renameItem, toggleTodo, updateProject,
   validateWorkbenchData, writeWorkbenchData,
 } from '../src/data/workbenchData.js';
@@ -13,6 +14,74 @@ function memoryStorage() {
     setItem(key, value) { values.set(key, value); },
   };
 }
+
+test('五类普通事项完成、改名和恢复保持原 ID、分类与其他属性', () => {
+  const createdAt = '2026-09-26T08:00:00.000Z';
+  const completedAt = '2026-09-26T08:10:00.000Z';
+  const restoredAt = '2026-09-26T08:20:00.000Z';
+  for (const type of ['todo', 'note', 'waiting', 'creation', 'shopping']) {
+    const base = type === 'todo' ? createTodo('原名称', true, createdAt)
+      : type === 'note' ? createNote('原名称', createdAt) : createSimpleItem(type, '原名称', createdAt, true);
+    const original = { ...base, tags: ['学习', 'VPS'], priority: true, customField: '保留' };
+    const completed = toggleTodo(original, completedAt);
+    assert.equal(completed.done, true);
+    assert.equal(completed.completedAt, completedAt);
+    const renamed = renameItem(completed, '改名', restoredAt);
+    const restored = toggleTodo(renamed, restoredAt);
+    assert.equal(restored.id, original.id);
+    assert.equal(restored.type, type);
+    assert.equal(restored.title, '改名');
+    assert.equal(restored.createdAt, createdAt);
+    assert.deepEqual(restored.tags, original.tags);
+    assert.equal(restored.priority, true);
+    assert.equal(restored.customField, '保留');
+    assert.equal(restored.done, false);
+    assert.equal(restored.completedAt, null);
+    const storage = memoryStorage();
+    for (const item of [completed, renamed, restored]) {
+      writeWorkbenchData({ schemaVersion: 2, items: [item] }, storage);
+      assert.deepEqual(readWorkbenchData(storage).items[0], item);
+    }
+    assert.throws(() => validateWorkbenchData({ schemaVersion: 2, items: [{ ...restored, completedAt }] }), /完成状态/);
+    assert.throws(() => validateWorkbenchData({ schemaVersion: 2, items: [{ ...completed, completedAt: null }] }), /完成状态/);
+  }
+});
+
+test('已有四类记录无完成字段也能读取，完成随笔不破坏转化关联', () => {
+  const now = '2026-09-26T08:00:00.000Z';
+  for (const type of ['note', 'waiting', 'creation', 'shopping']) {
+    const item = type === 'note' ? createNote('旧记录', now) : createSimpleItem(type, '旧记录', now);
+    delete item.done;
+    delete item.completedAt;
+    assert.equal(validateWorkbenchData({ schemaVersion: 2, items: [item] }).items[0], item);
+    assert.equal(toggleTodo(item, now).done, true);
+  }
+  const note = createNote('转化记录', now);
+  const converted = convertNote([note], note.id, 'waiting', '', now);
+  const finished = converted.map(item => item.id === note.id ? toggleTodo(item, now) : item);
+  const data = JSON.parse(JSON.stringify({ schemaVersion: 2, items: finished }));
+  validateWorkbenchData(data);
+  assert.equal(data.items[0].convertedToId, converted[1].id);
+  assert.equal(data.items[0].convertedToType, 'waiting');
+  assert.throws(() => convertNote(finished, note.id, 'todo', '', now), /不能重复/);
+  assert.equal(data.items[1].done, false);
+});
+
+test('12 项默认标签独立于数据，已有标签去重合并且允许项目零选或多选', () => {
+  const expected = ['学习', '代码', '生活', '健康', '购物', '娱乐', '创作', '六级', '健身', '手工', '软件开发', '奖励'];
+  assert.deepEqual(DEFAULT_USER_TAGS, expected);
+  assert.deepEqual(availableUserTags([]), expected);
+  assert.deepEqual(normalizeUserTags(['学习', '#学习', '##代码', '  代码  ', '']), ['学习', '代码']);
+  const project = createProject('标签项目', { tags: ['#学习', 'Vue', '项目', 'VPS', 'Linux'] });
+  assert.deepEqual(availableUserTags([project]), [...expected, 'Vue', '项目', 'VPS', 'Linux']);
+  const selected = updateProject(project, { tags: ['代码', '生活', '奖励'] });
+  const none = updateProject(selected, { tags: [] });
+  const storage = memoryStorage();
+  for (const item of [project, selected, none]) {
+    writeWorkbenchData({ schemaVersion: 2, items: [item] }, storage);
+    assert.deepEqual(readWorkbenchData(storage).items[0].tags, item.tags);
+  }
+});
 
 test('2.0 数据可以完整保存和恢复，旧键不被读取或删除', () => {
   const storage = memoryStorage();
@@ -225,7 +294,7 @@ test('旧项目仍可读取；新项目只在当前情况变化时追加真实�
   writeWorkbenchData({ schemaVersion: 2, items: [oldProject] }, storage);
   assert.deepEqual(readWorkbenchData(storage).items[0], oldProject);
   const base = projectEditableFields(oldProject);
-  assert.equal(base.status, 'active');
+  assert.equal(base.status, null);
   assert.deepEqual(parseProjectTags('#代码，#学习 代码'), ['代码', '学习']);
   assert.equal(updateProject(oldProject, base, '2026-09-25T10:01:00.000Z'), oldProject);
 
@@ -246,11 +315,82 @@ test('项目完成和恢复记录时间，坏历史不能覆盖已有备份', ()
   const finishedAt = '2026-09-25T10:05:00.000Z';
   const finished = updateProject(project, { ...projectEditableFields(project), status: 'done' }, finishedAt);
   assert.equal(finished.completedAt, finishedAt);
-  assert.equal(finished.updates.length, 0);
+  assert.equal(finished.updates.length, 1);
   writeWorkbenchData({ schemaVersion: 2, items: [finished] }, storage);
   const raw = storage.getItem(STORAGE_KEY);
   assert.throws(() => writeWorkbenchData({ schemaVersion: 2, items: [{ ...finished, updates: [{ id: 'x', content: '进展', createdAt: 'bad' }] }] }, storage), /项目详情/);
   assert.equal(storage.getItem(STORAGE_KEY), raw);
   const reopened = updateProject(finished, { ...projectEditableFields(finished), status: 'active' }, '2026-09-25T10:06:00.000Z');
   assert.equal(reopened.completedAt, null);
+});
+
+test('两种项目入口只生成一次创建记录，不自动补填快速项目详情', () => {
+  const now = '2026-09-26T06:00:00.000Z';
+  const quick = createSimpleItem('project', '快速项目', now, true);
+  for (const key of ['status', 'startDate', 'dueDate', 'currentSituation', 'nextStep', 'completedAt']) {
+    assert.equal(Object.hasOwn(quick, key), false);
+  }
+  assert.equal(quick.priority, true);
+  assert.deepEqual(quick.updates.map(record => [record.content, record.createdAt]), [['创建此项目', now]]);
+  const full = createProject('', { status: '', tags: [], startDate: '', dueDate: '', currentSituation: '创建时的情况', nextStep: '' }, now);
+  assert.equal(full.title, '未命名项目');
+  assert.equal(full.status, null);
+  assert.equal(full.updates.length, 1);
+  assert.equal(full.updates[0].content, '创建此项目');
+  const empty = createProject('', { status: '', tags: [], startDate: '', dueDate: '', currentSituation: '', nextStep: '' }, now);
+  const storage = memoryStorage();
+  const data = { schemaVersion: 2, items: [quick, full, empty] };
+  writeWorkbenchData(data, storage);
+  const backup = JSON.parse(JSON.stringify(readWorkbenchData(storage)));
+  writeWorkbenchData(validateWorkbenchData(backup), storage);
+  assert.deepEqual(readWorkbenchData(storage), data);
+  assert.equal(readWorkbenchData(storage).items.every(item => item.updates.length === 1), true);
+  assert.throws(() => writeWorkbenchData({ schemaVersion: 2, items: [createNote('', now)] }, storage), /格式/);
+});
+
+test('逐字段保存只修改目标字段；仅当前情况变化追加历史', () => {
+  const now = '2026-09-26T06:00:00.000Z';
+  const project = createProject('项目', {}, now);
+  assert.equal(updateProject(project, { title: '项目' }), project);
+  const named = updateProject(project, { title: '' }, '2026-09-26T06:01:00.000Z');
+  assert.equal(named.title, '');
+  assert.equal(Object.hasOwn(named, 'status'), false);
+  assert.equal(Object.hasOwn(named, 'nextStep'), false);
+  assert.deepEqual(named.updates, project.updates);
+  const next = updateProject(named, { nextStep: '下一步', tags: ['学习'], startDate: '2026-09-26' });
+  assert.equal(next.updates.length, 1);
+  const first = updateProject(next, { currentSituation: '第一版' }, '2026-09-26T06:02:00.000Z');
+  assert.equal(updateProject(first, { currentSituation: '第一版' }), first);
+  const second = updateProject(first, { currentSituation: '第二版' }, '2026-09-26T06:03:00.000Z');
+  assert.deepEqual(second.updates.map(record => record.content), ['创建此项目', '第一版', '第二版']);
+  assert.equal(project.updates.length, 1);
+  const spacedTitle = { ...project, title: ' 项目 ' };
+  assert.equal(updateProject(spacedTitle, { nextStep: '只改下一步' }).title, ' 项目 ');
+  assert.equal(second.tags[0], '学习');
+  const finishedAt = '2026-09-26T06:04:00.000Z';
+  const finished = updateProject(second, { status: 'done' }, finishedAt);
+  assert.equal(finished.completedAt, finishedAt);
+  assert.equal(updateProject(finished, { status: 'done' }), finished);
+  assert.equal(finished.updates.length, 3);
+  const storage = memoryStorage();
+  writeWorkbenchData({ schemaVersion: 2, items: [finished] }, storage);
+  const backup = JSON.parse(JSON.stringify(readWorkbenchData(storage)));
+  writeWorkbenchData(backup, storage);
+  assert.deepEqual(readWorkbenchData(storage).items[0], finished);
+});
+
+test('快速项目和完整创建共用 trim 与未命名项目兜底，只生成一条创建记录', () => {
+  const now = '2026-09-26T07:30:00.000Z';
+  for (const [input, expected] of [['  正常项目  ', '正常项目'], ['', '未命名项目'], ['   ', '未命名项目']]) {
+    const quick = createSimpleItem('project', input, now);
+    const full = createProject(input, { status: '', tags: [], currentSituation: '创建时填写', nextStep: '', startDate: '', dueDate: '' }, now);
+    for (const project of [quick, full]) {
+      assert.equal(project.title, expected);
+      assert.deepEqual(project.updates.map(record => [record.content, record.createdAt]), [['创建此项目', now]]);
+      const storage = memoryStorage();
+      writeWorkbenchData({ schemaVersion: 2, items: [project] }, storage);
+      assert.deepEqual(readWorkbenchData(storage).items[0], project);
+      assert.notEqual(project.status, '未设置');
+    }
+  }
 });
