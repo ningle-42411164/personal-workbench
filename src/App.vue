@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { useRegisterSW } from 'virtual:pwa-register/vue';
 import LaunchSplash from './components/LaunchSplash.vue';
-import ProjectDetail from './components/ProjectDetail.vue';
+import ProjectDialog from './components/ProjectDialog.vue';
 import ProjectCreate from './components/ProjectCreate.vue';
 import OrdinaryItem from './components/OrdinaryItem.vue';
 import CloudConnection from './components/CloudConnection.vue';
@@ -72,6 +72,9 @@ const conversionDate = ref('');
 const selectedTodoId = ref(null);
 const selectedDetailId = ref(null);
 const selectedProjectId = ref(null);
+const projectDialog = ref(null);
+// 唯一详情从完整集合取项目，完成/恢复改变分组也不会先卸载编辑器。
+const selectedProject = computed(() => workbenchData.value.items.find(item => item.type === 'project' && item.id === selectedProjectId.value));
 const showCompleted = ref(false);
 const showProjects = ref(true);
 const showOpenTodos = ref(true);
@@ -124,20 +127,16 @@ function refreshToday() {
 onMounted(() => {
   refreshToday();
   document.addEventListener('visibilitychange', refreshToday);
-  document.addEventListener('click', closeProjectFromOutside);
 });
 onBeforeUnmount(() => {
   // 组件移除时同时清理定时器与 document 监听，避免旧页面逻辑继续运行。
   clearTimeout(midnightTimer);
   document.removeEventListener('visibilitychange', refreshToday);
-  document.removeEventListener('click', closeProjectFromOutside);
 });
 
-function closeProjectFromOutside(event) {
-  if (!event.target.closest('.project-detail, .project-list-trigger')) selectedProjectId.value = null;
-}
-
-function toggleProjectDetails(id) {
+async function toggleProjectDetails(id) {
+  // 切换项目也经过同一保存检查；原生模态外壳会阻止直接操作背景列表。
+  if (selectedProjectId.value && !await projectDialog.value?.saveBeforeLeave()) return;
   selectedProjectId.value = selectedProjectId.value === id ? null : id;
 }
 
@@ -256,7 +255,7 @@ function saveProject(nextProject) {
   // find 确认原项目仍存在；详情组件提出新值，由父组件统一负责实际持久化。
   const previous = workbenchData.value.items.find(item => item.id === nextProject.id && item.type === 'project');
   if (!previous || !saveTasks(workbenchData.value.items.map(item => item.id === nextProject.id ? nextProject : item))) return false;
-  if ((previous.status === 'done') !== (nextProject.status === 'done')) selectedProjectId.value = null;
+  // 外壳在所有编辑保存成功后决定是否关闭；这里不因状态分组变化提前卸载草稿。
   return true;
 }
 
@@ -453,7 +452,6 @@ function confirmImport() {
       <article v-for="(item, index) in visibleProjects" :key="item.id" class="category-row">
         <div class="item-line"><button type="button" class="category-title project-list-trigger" :aria-label="item.title ? undefined : '打开空名称项目详情'" :aria-expanded="selectedProjectId === item.id" @click="toggleProjectDetails(item.id)">{{ item.title }}<span v-for="tag in item.tags" :key="tag" class="project-user-tag">#{{ tag.replace(/^#+/, '') }}</span><span v-if="!showProjects && projects.length > 2 && index === 1" class="more-ellipsis" aria-hidden="true">……</span></button><span v-if="item.priority === true" class="urgent-mark item-status">优先处理</span></div>
         <p class="project-next-step">{{ item.nextStep }}</p>
-        <ProjectDetail v-if="selectedProjectId === item.id" :project="item" :can-edit="storageReadable" :available-tags="availableProjectTags" :save-project="saveProject" :delete-project="deleteItem" @close="selectedProjectId = null" />
       </article>
     </section>
 
@@ -506,7 +504,6 @@ function confirmImport() {
         <article v-for="item in completedProjects" :key="item.id" class="category-row completed-project">
           <div class="item-line"><button type="button" class="category-title project-list-trigger" :aria-label="item.title ? undefined : '打开已完成的空名称项目详情'" :aria-expanded="selectedProjectId === item.id" @click="toggleProjectDetails(item.id)">{{ item.title }}<span v-for="tag in item.tags" :key="tag" class="project-user-tag">#{{ tag.replace(/^#+/, '') }}</span></button><span v-if="item.priority === true" class="urgent-mark item-status">优先处理</span></div>
           <p class="project-next-step">{{ item.nextStep }}</p>
-          <ProjectDetail v-if="selectedProjectId === item.id" :project="item" :can-edit="storageReadable" :available-tags="availableProjectTags" :save-project="saveProject" :delete-project="deleteItem" @close="selectedProjectId = null" />
         </article>
       </div>
     </section>
@@ -531,6 +528,7 @@ function confirmImport() {
       </div>
     </footer>
     </template>
+    <ProjectDialog v-if="selectedProject && cloudState.source === 'local'" ref="projectDialog" :key="selectedProject.id" :project="selectedProject" :can-edit="storageReadable" :available-tags="availableProjectTags" :save-project="saveProject" :delete-project="deleteItem" @close="selectedProjectId = null" />
     <!-- 默认收起的连接入口放在整页最后；本机首页继续使用原来的布局。 -->
     <details class="cloud-settings">
       <summary>云端连接</summary>

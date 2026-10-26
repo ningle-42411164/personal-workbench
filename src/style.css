@@ -85,6 +85,15 @@ input:focus, select:focus { border-color: #244d43; }
 .completed-project { border-left: 2px solid #cbd8ce; padding-left: 12px; }
 .completed-project > .item-line .category-title { color: #65766e; }
 .project-detail { min-width: 0; margin-top: 12px; padding: 14px; border: 1px solid #dfe5df; border-radius: 10px; background: #f8faf7; font-size: 13px; overflow-wrap: anywhere; }
+/* 原生顶层模态不占列表高度；动态视口限制卡片，长字段与历史在卡片内部滚动。 */
+.project-dialog { width: min(680px, calc(100vw - 28px)); max-width: none; max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); margin: auto; padding: 20px; border: 1px solid #dfe5df; border-radius: 16px; color: #243d36; background: #fff; overflow: auto; overscroll-behavior: contain; box-shadow: 0 20px 80px #17382d40; }
+.project-dialog::backdrop { background: #152e2870; }
+.project-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.project-dialog-title { margin: 0; }
+.project-dialog-head .project-close { flex: 0 0 44px; width: 44px; height: 44px; border-radius: 8px; }
+.project-dialog .project-detail { margin-top: 12px; }
+.project-dialog .project-field-row { grid-template-columns: 100px minmax(0, 1fr); }
+.project-dialog .project-field-editor { grid-column: 2; }
 .project-list-trigger { min-height: 36px; }
 .category-row .project-next-step { min-height: 20px; margin: 0; color: #65766e; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
 .project-field-row { display: grid; grid-template-columns: 100px minmax(0, 1fr) 28px; align-items: start; gap: 8px; padding: 7px 0; border-bottom: 1px solid #e7ede7; }
@@ -152,6 +161,9 @@ footer { margin-top: 28px; font-size: 13px; line-height: 1.7; }
 .import-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 /* 小屏只调整布局：状态标签、日期和字段编辑器换行，完成/保存事件仍使用同一套 Vue 逻辑。 */
 @media (max-width: 480px) {
+  .project-dialog { padding: 14px; }
+  .project-dialog .project-field-row { grid-template-columns: minmax(0, 1fr); }
+  .project-dialog .project-field-value, .project-dialog .project-field-editor { grid-column: 1; }
   main { padding: 28px 14px 48px; }
   .panel { padding: 16px; }
   .todo-row { grid-template-columns: 44px minmax(0, 1fr); }
