@@ -57,6 +57,16 @@ test('本地 workerd：OAuth授权码+PKCE、未认证拦截及真实D1读写完
   const authQuery = new URLSearchParams({ client_id: registered.client_id, response_type: 'code',
     redirect_uri: 'https://chatgpt.com/connector/oauth/test-only', scope: 'workbench:read workbench:write offline_access',
     resource: base, state: 'client-owned-state', code_challenge: challenge, code_challenge_method: 'S256' });
+  for (const [change, category] of [[{ client_id: 'nonexistent-test-client' }, 'client_unknown'], [{ redirect_uri: 'https://wrong.test/' }, 'redirect_mismatch']]) {
+    const invalidQuery = new URLSearchParams(authQuery);
+    for (const [key, value] of Object.entries(change)) invalidQuery.set(key, value);
+    const rejected = await call(`/authorize?${invalidQuery}`);
+    const failure = await rejected.json();
+    assert.equal(rejected.status, 400);
+    assert.deepEqual({ stage: failure.diagnostic.stage, category: failure.diagnostic.category }, { stage: 'authorize_parse', category });
+    assert.match(failure.diagnostic.correlationId, /^[0-9a-f-]{36}$/);
+    assert.doesNotMatch(JSON.stringify(failure), /client-owned-state|fake-secret|code_challenge|redirect_uri/);
+  }
   const consent = await call(`/authorize?${authQuery}`);
   assert.equal(consent.status, 200, await consent.clone().text());
   assert.equal(consent.headers.get('referrer-policy'), 'same-origin');
@@ -66,6 +76,19 @@ test('本地 workerd：OAuth授权码+PKCE、未认证拦截及真实D1读写完
   assert.doesNotMatch(html, /<script>/);
   assert.match(html, /&lt;script&gt;/);
   const handle = /name="handle" value="([^"]+)"/.exec(html)[1];
+  const missingBinding = await call('/authorize/decision', { method: 'POST', headers: {
+    Origin: base, 'Content-Type': 'application/x-www-form-urlencoded',
+  }, body: new URLSearchParams({ handle, decision: 'allow' }).toString() });
+  assert.equal((await missingBinding.json()).diagnostic.category, 'browser_binding_missing');
+  const browserMissingBinding = await call('/authorize/decision', { method: 'POST', headers: {
+    Origin: base, Accept: 'text/html', 'Content-Type': 'application/x-www-form-urlencoded',
+  }, body: new URLSearchParams({ handle, decision: 'allow' }).toString() });
+  assert.equal(browserMissingBinding.status, 400);
+  const help = await browserMissingBinding.text();
+  assert.match(help, /请在 Edge 普通浏览器完成连接/);
+  assert.match(help, /https:\/\/ningle-42411164.github.io\/personal-workbench\//);
+  assert.doesNotMatch(help, new RegExp(handle));
+  assert.doesNotMatch(help, /client-owned-state|fake-secret|code_challenge=/);
   // 修复浏览器表单策略不等于放宽来源白名单：opaque origin 依然必须被拒绝。
   const opaqueOrigin = await call('/authorize/decision', { method: 'POST', headers: {
     Origin: 'null', Cookie: cookies(consent), 'Content-Type': 'application/x-www-form-urlencoded',
@@ -79,6 +102,10 @@ test('本地 workerd：OAuth授权码+PKCE、未认证拦截及真实D1读写完
   assert.equal(githubUrl.origin, 'https://github.com');
   assert.equal(githubUrl.searchParams.get('scope'), 'read:user');
   const callbackPath = `/auth/github/callback?${new URLSearchParams({ state: githubUrl.searchParams.get('state'), code: 'fake-github-code' })}`;
+  const missingUpstreamBinding = await call(callbackPath);
+  const upstreamFailure = await missingUpstreamBinding.json();
+  assert.equal(upstreamFailure.diagnostic.stage, 'github_return');
+  assert.equal(upstreamFailure.diagnostic.category, 'browser_binding_missing');
   const callback = await call(callbackPath, { headers: { Cookie: cookies(approval) } });
   assert.equal(callback.status, 302, await callback.clone().text());
   const location = new URL(callback.headers.get('location'));
@@ -122,5 +149,6 @@ test('本地 workerd：OAuth授权码+PKCE、未认证拦截及真实D1读写完
   assert.deepEqual(competing.map(response => response.status).sort(), [200, 409]);
   const reusedCallback = await call(callbackPath, { headers: { Cookie: cookies(approval) } });
   assert.equal(reusedCallback.status, 400);
+  assert.equal((await reusedCallback.json()).diagnostic.category, 'transaction_expired_or_used');
   fetchMock.assertNoPendingInterceptors();
 });

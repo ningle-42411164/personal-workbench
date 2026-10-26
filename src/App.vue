@@ -532,7 +532,7 @@ function confirmImport() {
     <!-- 默认收起的连接入口放在整页最后；本机首页继续使用原来的布局。 -->
     <details class="cloud-settings">
       <summary>云端连接</summary>
-      <CloudConnection :state="cloudState" @source="cloud.selectSource" @login="cloud.login()" @enable-write="cloud.login({ write: true })" @logout="cloud.logout" @refresh="cloud.refresh()" />
+      <CloudConnection :state="cloudState" @source="cloud.selectSource" @login="cloud.login()" @enable-write="cloud.login({ write: true })" @resume="cloud.resumeConnection()" @logout="cloud.logout" @refresh="cloud.refresh()" />
     </details>
   </main>
 </template>

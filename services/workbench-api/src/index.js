@@ -4,7 +4,7 @@ import { WorkbenchService, READ_SCOPE, WRITE_SCOPE } from './service.js';
 import { handleApi, json } from './http.js';
 import { handleAuthorization } from './authorization.js';
 import { ApiError, publicError } from './errors.js';
-import { diagnoseTokenResponse } from './authorizationDiagnostics.js';
+import { diagnoseTokenResponse, browserBindingHelp } from './authorizationDiagnostics.js';
 
 export function validateConfig(env) {
   let base;
@@ -93,6 +93,8 @@ export default {
       return withHeaders(response, origin, true);
     } catch (error) {
       const failure = publicError(error);
+      const help = browserBindingHelp(request, failure, env.FRONTEND_ORIGIN);
+      if (help) return withHeaders(help, origin, true);
       return withHeaders(json({ code: failure.code, message: failure.message, ...(failure.diagnostic ? { diagnostic: failure.diagnostic } : {}) }, failure.status), origin, true);
     }
   },

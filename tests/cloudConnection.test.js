@@ -7,6 +7,7 @@ import { createCloudController } from '../src/cloud/cloudController.js';
 import { createWorkbenchApi } from '../src/cloud/workbenchApi.js';
 import { CLOUD_CONFIG } from '../src/cloud/cloudConfig.js';
 import { createProject } from '../src/data/workbenchData.js';
+import { needsBrowserConnection, browserConnectionUrl } from '../src/cloud/browserConnection.js';
 
 const later = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -224,4 +225,23 @@ test('保存后确认读取不会复用保存前尚未完成的旧 GET', async (
   assert.equal(calls, 2);
   assert.equal(controller.getState().items[0].version, 3);
   controller.stop();
+});
+
+test('安装入口引导普通浏览器连接；恢复时识别另一窗口已升级的会话，不继续缓存只读权限', async () => {
+  assert.equal(needsBrowserConnection({ matchMedia: query => ({ matches: query === '(display-mode: standalone)' }) }, {}), true);
+  assert.equal(needsBrowserConnection({ matchMedia: () => ({ matches: false }) }, {}), false);
+  assert.equal(needsBrowserConnection(undefined, { standalone: true }), true);
+  assert.equal(browserConnectionUrl, CLOUD_CONFIG.redirectUri);
+  assert.ok(!/[?#]/.test(browserConnectionUrl)); // 入口不包含 code、state 或令牌。
+  const s = setup(); await authorize(s);
+  const installed = createCloudAuth({ vault: s.vault, client: s.client, now: () => 101000 });
+  await installed.restore(); assert.equal(installed.getStatus().canWrite, false);
+  s.client.register = async () => 'fake-browser-write-client';
+  await s.auth.login({ write: true });
+  const transaction = await s.vault.get('transaction');
+  s.client.exchange = async () => ({ ...fakeTokens(8), scope: CLOUD_CONFIG.writeScope });
+  s.client.refresh = async () => ({ ...fakeTokens(9), scope: CLOUD_CONFIG.writeScope });
+  await s.auth.finish(`${CLOUD_CONFIG.redirectUri}?state=${transaction.state}&code=fake-code`);
+  assert.equal(await installed.restore(), 'fake-access-9');
+  assert.equal(installed.getStatus().canWrite, true);
 });

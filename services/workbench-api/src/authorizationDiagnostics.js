@@ -1,4 +1,5 @@
 import { publicError } from './errors.js';
+const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 
 // 只将锁定的 1.2.4 库中已知错误映射成枚举。绝不输出原始 description、URL、cookie 或凭证。
 const categories = new Map([
@@ -37,4 +38,12 @@ export async function diagnoseTokenResponse(response, stage) {
   const diagnostic = { stage, category: allowed.has(body.error) ? body.error : 'token_rejected', correlationId: crypto.randomUUID() };
   console.warn(JSON.stringify({ event: 'oauth_failure', ...diagnostic }));
   return Response.json({ ...body, diagnostic }, { status: response.status, headers: response.headers });
+}
+
+export function browserBindingHelp(request, failure, frontendOrigin) {
+  if (failure.diagnostic?.category !== 'browser_binding_missing' || !request.headers.get('accept')?.includes('text/html') || !frontendOrigin) return null;
+  const entry = new URL('/personal-workbench/', frontendOrigin);
+  if (entry.protocol !== 'https:') return null;
+  // 缺 cookie 必须拒绝，不能用 handle、URL 参数或 GitHub 身份绕过浏览器绑定。
+  return new Response(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>请在普通浏览器完成连接</title><main><h1>请在 Edge 普通浏览器完成连接</h1><p>当前桌面入口没有回传授权所需的浏览器绑定，本次授权未通过。</p><p>请在 Edge 地址栏打开以下公开工作台入口，展开页尾“云端连接”完成一次授权，然后重开桌面工作台恢复连接。</p><p><a href="${escapeHtml(entry.href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(entry.href)}</a></p><p>不要重复点击旧授权页，不需要重建凭证。</p><p>诊断：${escapeHtml(failure.diagnostic.stage)} / browser_binding_missing / ${escapeHtml(failure.diagnostic.correlationId)}</p></main></html>`, { status: failure.status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'; base-uri 'none'" } });
 }

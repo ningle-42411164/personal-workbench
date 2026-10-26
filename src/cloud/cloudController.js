@@ -7,6 +7,7 @@ export function createCloudController({ auth, api, now = Date.now, isOnline = ()
   let reading;
   let request;
   let lastReadStartedAt = -Infinity;
+  let resuming;
   const listeners = new Set();
   function publish(patch) { state = { ...state, ...patch }; listeners.forEach(listener => listener(state)); }
   function cancelRead() { epoch++; request?.abort(); reading = undefined; }
@@ -55,6 +56,19 @@ export function createCloudController({ auth, api, now = Date.now, isOnline = ()
     try { const url = await auth.login(options); navigate(url); }
     catch (error) { if (error?.name !== 'AbortError') publish({ message: connectionError(error).message }); }
   }
+  async function resumeConnection() {
+    if (resuming) return resuming;
+    cancelRead();
+    const start = epoch;
+    const operation = (async () => {
+      try {
+        await auth.restore(true);
+        if (start === epoch && state.source === 'cloud' && state.auth.state === 'connected') await refresh();
+      } catch (error) { if (start === epoch && error?.name !== 'AbortError') publish({ message: connectionError(error).message }); }
+    })();
+    resuming = operation;
+    try { return await operation; } finally { if (resuming === operation) resuming = undefined; }
+  }
   async function logout() {
     cancelRead();
     const start = epoch;
@@ -80,7 +94,7 @@ export function createCloudController({ auth, api, now = Date.now, isOnline = ()
     return refresh('manual');
   }
   return {
-    start, login, logout, refresh, refreshAfterWrite, selectSource, externalLogout, offline,
+    start, login, logout, refresh, refreshAfterWrite, resumeConnection, selectSource, externalLogout, offline,
     getState: () => state,
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     stop() { cancelRead(); unsubscribe(); listeners.clear(); },

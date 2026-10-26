@@ -23,6 +23,8 @@ Vue 3, JavaScript, Vite, and `vite-plugin-pwa`. Records are stored in `localStor
 
 The separate [Cloudflare Worker service](services/workbench-api/README.md) is shared with ChatGPT MCP. There is no user registration, multi-user account system, automatic migration, or full offline synchronization. See [1A authentication](docs/mobile-cloud-1a-2026-10-26.md) and the [1B implementation, acceptance, and learning index](docs/mobile-cloud-1b-2026-10-26.md).
 
+On the tested Huawei Edge home-screen entry, first authorization needs the ordinary Edge browser because its installed authorization context does not return the required binding cookie. Complete the connection in the browser, then return and check/reopen the installed workbench; its encrypted saved connection restores without repeating daily authorization. The app guides this path and retains the server's cookie, PKCE, owner, and scope checks.
+
 ## Local development
 
 Use Node.js 24 and npm. From the project directory:

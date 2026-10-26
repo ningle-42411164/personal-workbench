@@ -16,6 +16,8 @@ export async function handleMcp(request, service, publicBaseUrl) {
     }, async input => {
       try {
         const result = await handler(input);
+        // 联调证据只记录工具名和成功，不记录参数、事项正文、身份或令牌。
+        console.info(JSON.stringify({ event: 'mcp_tool_completed', tool: name, success: true, correlationId: crypto.randomUUID() }));
         return { content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: result };
       } catch (error) {
         const failure = publicError(error);

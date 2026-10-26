@@ -31,7 +31,7 @@ export function createCloudAuth({ config = CLOUD_CONFIG, vault = createCredentia
     if (!await vault.put('session', session, revision)) throw interrupted();
     ensureCurrent(start);
     if (await vault.revision() !== revision) throw interrupted();
-    access = { token: result.access_token, canWrite: scopes.includes('workbench:write'), expiresAt: now() + Math.min(Number(result.expires_in) || config.accessTokenSeconds, config.accessTokenSeconds) * 1000, revision };
+    access = { token: result.access_token, clientId: session.clientId, scope: session.scope, grantExpiresAt: session.grantExpiresAt, canWrite: scopes.includes('workbench:write'), expiresAt: now() + Math.min(Number(result.expires_in) || config.accessTokenSeconds, config.accessTokenSeconds) * 1000, revision };
     publish('connected', `${access.canWrite ? '云端测试读写' : '只读'}连接已恢复；本机事项仍独立保存。`, true);
     return access.token;
   }
@@ -41,7 +41,11 @@ export function createCloudAuth({ config = CLOUD_CONFIG, vault = createCredentia
     publish(failure.kind === 'network' ? 'offline' : 'error', failure.message);
   }
   async function restore(force = false) {
-    if (!force && access && access.expiresAt > now() + 30000 && await vault.revision() === access.revision) return access.token;
+    if (!force && access && access.expiresAt > now() + 30000 && await vault.revision() === access.revision) {
+      // 普通浏览器可能刚完成了权限升级。不能继续使用桌面窗口缓存的一小时只读令牌。
+      const saved = await vault.get('session');
+      if (saved?.clientId === access.clientId && saved.scope === access.scope && saved.grantExpiresAt === access.grantExpiresAt) return access.token;
+    }
     if (renewing) return renewing;
     const start = generation;
     const signal = controller.signal;
