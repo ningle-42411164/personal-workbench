@@ -90,4 +90,6 @@
 - 服务地址：`https://personal-workbench-api-test.personal-workbench-ningle-test.workers.dev`；MCP 地址加 `/mcp`。原 D1/KV 复用，没有新付费资源或方案升级。
 - 部署后 `/health` 为 200 / ready=true，匿名 `/mcp` 和 `/api/items` 为 401，OAuth 发现仍为 PKCE S256 与原读写范围。
 - 本机根目录测试、生产构建及服务测试/check 通过。Pages 工作流增加 API 依赖安装与 API 检查，以支持首页同步与共享服务的集成验证；没有让 CI 部署 Worker 或读取 Cloudflare secrets。
-- Pages 实际发布结果待本批正常 Push 后核对，不能把本机 build 当成已上线。
+- 实现提交 `9c7a51018a5d6d0dbf76df86f8403db8bca59164`，main 正常 Push；[Pages 运行 40293384651](https://github.com/ningle-42411164/personal-workbench/actions/runs/40293384651) completed / success。公开页面 200，实际新资源为 `index-6CGX9o1z.js`；已核对自动同步设置、事务队列和回执校验代码实际存在。
+- 部署后 D1 仍只有原三条测试记录，版本分别项目 v4、两个 todo v1；原 GPT 更新 requestId 仍仅一条成功回执，增量初始快照三条。没有为排查回复加载故障重复写入数据。
+- 当前状态：首批代码与公开发布已完成，真实手机自动同步及本批 GPT 交叉验证待验收；不能用 1B 手动写入结果或自动测试数量替代。
