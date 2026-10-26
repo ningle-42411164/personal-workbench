@@ -47,6 +47,16 @@ export async function handleMcp(request, service, publicBaseUrl) {
   register('get_project', '读取项目字段、历史和当前 version；更新项目前先调用。', getProjectSchema, false, input => service.getProject(input));
   register('create_item', '用户确认后创建一条事项或项目；网络重试复用 requestId，不批量创建。', createSchema, true, input => service.create(input));
   register('update_project', '用户确认后更新指定项目字段；必须提供先前读取的 expectedVersion，保留其余字段与历史。', updateSchema, true, input => service.updateProject(input));
+  // 判别实验：独立注册，避免通用包装器添加 structuredContent、outputSchema 或 _meta。
+  // 仍经过同一 OAuth/所有者检查，只读且不访问数据库；保留其他工具与传输行为作为对照。
+  server.registerTool('ping', {
+    description: '只读连通性判别：返回固定纯文本，不读取或修改任何事项。', inputSchema: {},
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, async () => {
+    service.require(READ_SCOPE);
+    console.info(JSON.stringify({ event: 'mcp_ping_completed', success: true, correlationId: crypto.randomUUID() }));
+    return { content: [{ type: 'text', text: 'Personal Workbench ping OK' }] };
+  });
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined, enableJsonResponse: true, maxRequestBodySize: 65536,
   });

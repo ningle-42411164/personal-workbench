@@ -15,8 +15,9 @@ export function createSyncEngine({ store, api, isOnline = () => globalThis.navig
       try {
         let state = await store.read();
         if (!state.enabled) { publish('paused', '自动同步未开启；本机仍可编辑。'); return; }
-        if (!isOnline()) { publish('offline', '离线：修改已保存在本机，联网后自动继续。'); return; }
-        publish('syncing', '正在同步…');
+        if (!isOnline()) { publish('offline', '离线：待同步修改已保存在本机，联网后自动继续。'); return; }
+        const pending = Object.keys(state.dirty).length;
+        publish('syncing', pending ? `待同步 ${pending} 项，正在连接云端…` : '正在获取云端变化…');
         for (let count = 0; count < 100 && active(); count++) {
           const job = await store.prepare();
           if (!job) break;
@@ -46,11 +47,12 @@ export function createSyncEngine({ store, api, isOnline = () => globalThis.navig
         failures = 0;
         state = await store.read();
         const conflicts = Object.keys(state.blocked).length;
-        publish(conflicts ? 'conflict' : Object.keys(state.dirty).length ? 'pending' : 'ready', conflicts ? '有待核对的修改，其他记录继续同步。' : Object.keys(state.dirty).length ? '修改已保存，正在等待下一轮补传。' : '已同步', { lastSuccess: now() });
+        publish(conflicts ? 'conflict' : Object.keys(state.dirty).length ? 'pending' : 'ready', conflicts ? '部分事项待同步／需核对，其他记录继续同步。' : Object.keys(state.dirty).length ? '修改待同步，已保存在本机，等待下一轮补传。' : '已同步', { lastSuccess: now() });
       } catch (error) {
         if (!active()) return;
         failures++;
-        publish(['login', 'permission'].includes(error.kind) ? error.kind : 'failed', ['login', 'permission'].includes(error.kind) ? error.message : '暂时无法同步，本机内容保留，将自动重试。');
+        // Worker 不可达或返回错误时，即使浏览器仍报告 online，也必须显示失败/待同步。
+        publish(['login', 'permission'].includes(error.kind) ? error.kind : 'failed', ['login', 'permission'].includes(error.kind) ? `${error.message} 待同步修改保留在本机。` : '同步失败；待同步修改保留在本机，将自动重试。');
       }
     })();
     running = operation;

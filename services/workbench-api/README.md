@@ -15,6 +15,7 @@
 | `get_project` | `GET /api/projects/:id` | `workbench:read` |
 | `create_item` | `POST /api/items` | `workbench:write` |
 | `update_project` | `PATCH /api/projects/:id` | `workbench:read` 和 `workbench:write` |
+| `ping`（判别实验） | 无事项 REST 对应，只返回固定纯文本 | `workbench:read` |
 
 - 新建支持现有八种类型；项目更新复用 `src/data/workbenchData.js` 的规则与历史逻辑。
 - MCP 没有删除、整库替换、任意 SQL、任意脚本或文件操作工具。
@@ -23,6 +24,7 @@
 - 网页已增加独立 IndexedDB 事务队列和首次纳入预览；初次纳入正式事项仍需用户明确确认。详见 `docs/cloud-sync-batch1-2026-10-26.md`。
 - 正式事项 JSON 继续使用现有 v2 字段；服务端单独维护版本号和去重回执，不写回浏览器。
 - 当前版本只用于新建的测试数据库。接入正式数据前，需核对 Windows 最新源码及旧备份兼容性。
+- MCP 判别实验与原始 HTTP 结果、纯文本 ping、工具目录刷新及待处理方案见仓库 `docs/mcp-discriminator-2026-10-26.md`。原事项工具的格式未在本轮自动修改。
 
 ## 安装与本地验证
 

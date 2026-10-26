@@ -60,8 +60,14 @@ test('真实MCP SDK客户端完成初始化、工具发现、创建、查询和�
   const client = new Client({ name: 'integration-test', version: '1.0.0' });
   await client.connect(transport); t.after(() => client.close());
   const { tools } = await client.listTools();
-  assert.deepEqual(tools.map(tool => tool.name), ['list_items', 'get_project', 'create_item', 'update_project']);
-  assert.ok(tools.every(tool => tool.outputSchema?.type === 'object'));
+  assert.deepEqual(tools.map(tool => tool.name), ['list_items', 'get_project', 'create_item', 'update_project', 'ping']);
+  assert.ok(tools.filter(tool => tool.name !== 'ping').every(tool => tool.outputSchema?.type === 'object'));
+  const ping = tools.find(tool => tool.name === 'ping');
+  assert.equal(Object.hasOwn(ping, 'outputSchema'), false);
+  assert.equal(Object.hasOwn(ping, '_meta'), false);
+  const beforePing = await service.list({ includeCompleted: true });
+  assert.deepEqual(await client.callTool({ name: 'ping', arguments: {} }), { content: [{ type: 'text', text: 'Personal Workbench ping OK' }] });
+  assert.deepEqual(await service.list({ includeCompleted: true }), beforePing);
   assert.deepEqual(tools.find(tool => tool.name === 'list_items').outputSchema.required.sort(), ['items', 'nextOffset']);
   assert.equal(tools.find(tool => tool.name === 'list_items').annotations.readOnlyHint, true);
   assert.equal(tools.find(tool => tool.name === 'create_item').annotations.readOnlyHint, false);

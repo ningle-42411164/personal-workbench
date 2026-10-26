@@ -18,11 +18,13 @@ function setup(t, items = []) {
   const store = createSyncStore({ indexedDB, storage });
   const db = sqliteD1();
   const service = new WorkbenchService(new D1Store(db, 'fictional-owner'), { id: 'fictional-owner', scopes: [READ_SCOPE, WRITE_SCOPE] });
-  const controls = { online: true, loseReply: false, corruptReply: false, denied: false, calls: [], statuses: [] };
+  const controls = { online: true, workerFailure: null, loseReply: false, corruptReply: false, denied: false, calls: [], statuses: [] };
   const api = createSyncApi({ issuer: 'https://sync.test', auth: { getAccessToken: async () => 'fake-local-test-access', getStatus: () => ({ canWrite: !controls.denied }) },
     async fetcher(url, init) {
       controls.calls.push({ path: url.pathname, method: init.method, body: init.body });
       if (!controls.online) throw new TypeError('fictional network unavailable');
+      if (controls.workerFailure === 'network') throw new TypeError('fictional Worker unreachable while online');
+      if (controls.workerFailure === '503') return Response.json({ code: 'SERVICE_UNAVAILABLE' }, { status: 503 });
       const response = await handleApi(new Request(url, init), service, 'https://sync.test');
       if (controls.loseReply && init.method === 'PUT') { controls.loseReply = false; throw new TypeError('fictional reply lost after commit'); }
       if (controls.corruptReply && init.method === 'PUT') { controls.corruptReply = false; const value = await response.json(); return Response.json({ ...value, item: { ...value.item, title: '错误回执内容' } }); }
@@ -35,6 +37,25 @@ function setup(t, items = []) {
 }
 async function add(store, item) { const state = await store.read(); return store.save(data([...state.data.items, item]), state.revision); }
 async function change(store, id, operation) { const state = await store.read(); return store.save(data(state.data.items.map(item => item.id === id ? operation(item) : item)), state.revision); }
+
+test('浏览器保持 online 但 Worker 连接失败/503 时明确显示同步失败与待同步，保留原请求并在恢复后唯一提交', async t => {
+  for (const failure of ['network', '503']) await t.test(failure, async t => {
+    const s = setup(t); await s.store.read(); await s.store.setEnabled(true);
+    const todo = createTodo(`虚构 Worker 失败 ${failure}`, false, at); await add(s.store, todo);
+    s.controls.workerFailure = failure;
+    await s.engine.run();
+    const state = await s.store.read();
+    assert.equal(s.controls.online, true); assert.equal(s.controls.statuses.at(-1).phase, 'failed');
+    assert.match(s.controls.statuses.at(-1).message, /同步失败.*待同步/);
+    assert.ok(state.dirty[todo.id]); assert.ok(state.outbox[todo.id]); assert.equal(state.data.items[0].title, todo.title);
+    assert.equal((await s.service.list({ includeCompleted: true })).items.length, 0);
+    const first = s.controls.calls.find(call => call.method === 'PUT');
+    s.controls.workerFailure = null; await s.engine.run();
+    const writes = s.controls.calls.filter(call => call.method === 'PUT'); assert.equal(writes[1].body, first.body);
+    assert.deepEqual((await s.store.read()).dirty, {}); assert.equal(s.controls.statuses.at(-1).phase, 'ready');
+    assert.equal((await s.service.list({ includeCompleted: true })).items.length, 1);
+  });
+});
 
 test('首次初始化保留原 v2 与正式事项；只在开启后自动纳入新建待办/项目，旧事项需带版本的明确预览确认', async t => {
   const formal = createTodo('虚构的既有本机记录', false, at), s = setup(t, [formal]);
