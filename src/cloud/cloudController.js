@@ -51,15 +51,17 @@ export function createCloudController({ auth, api, now = Date.now, isOnline = ()
     catch (error) { if (error?.name !== 'AbortError') publish({ message: connectionError(error).message }); }
   }
   async function login() {
+    cancelRead();
     try { const url = await auth.login(); navigate(url); }
     catch (error) { if (error?.name !== 'AbortError') publish({ message: connectionError(error).message }); }
   }
   async function logout() {
     cancelRead();
+    const start = epoch;
     publish({ items: [], readState: 'idle', stale: false, lastReadAt: null, message: '正在退出云端连接。' });
     announceLogout();
-    try { const result = await auth.logout(); publish({ message: result.message }); }
-    catch { publish({ message: '本机视图已清除，但连接存储未能清理。请检查存储设置后再次退出。' }); }
+    try { const result = await auth.logout(); if (start === epoch && !result.obsolete) publish({ message: result.message }); }
+    catch { if (start === epoch) publish({ message: '本机视图已清除，但连接存储未能清理。请检查存储设置后再次退出。' }); }
   }
   function externalLogout() {
     cancelRead(); auth.invalidate();
@@ -68,6 +70,8 @@ export function createCloudController({ auth, api, now = Date.now, isOnline = ()
   function offline() {
     if (state.source !== 'cloud') return;
     cancelRead();
+    // 离线打断后，真正恢复联网的第一次读取不被此前成功请求的短时去抖吞掉。
+    lastReadStartedAt = -Infinity;
     publish({ readState: 'failed', stale: state.lastReadAt !== null, message: '离线／内容可能已过期。联网后可重新读取；本批没有离线写入。' });
   }
   return {

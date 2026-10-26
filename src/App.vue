@@ -370,6 +370,7 @@ function confirmImport() {
     </div>
     <header><span class="eyebrow">Personal Workbench</span><h1>欢迎回来，从哪里开始干活？</h1></header>
     <CloudConnection :state="cloudState" @source="cloud.selectSource" @login="cloud.login" @logout="cloud.logout" @refresh="cloud.refresh()" />
+    <div v-if="needRefresh" class="notice">有新版本可用。<button @click="updateServiceWorker()">更新应用</button></div>
     <CloudReadOnly v-if="cloudState.source === 'cloud'" :state="cloudState" />
     <!-- 本机视图保留原读写和导入导出；云端结果没有调用这些保存入口。 -->
     <template v-else>
@@ -417,7 +418,6 @@ function confirmImport() {
         <input v-if="quickType === 'importantDate'" id="quick-target-date" v-model="quickTargetDate" type="date" :disabled="!storageReadable">
       </div>
     </form>
-    <div v-if="needRefresh" class="notice">有新版本可用。<button @click="updateServiceWorker()">更新应用</button></div>
     <p v-if="message" role="alert" class="error">{{ message }}</p>
 
     <section class="panel date-section" aria-label="重要日卡片">

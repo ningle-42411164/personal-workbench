@@ -122,13 +122,15 @@ export function createCloudAuth({ config = CLOUD_CONFIG, vault = createCredentia
   }
   async function logout() {
     cancel(); renewing = undefined;
-    publish('disconnected', '正在清除本机连接。', false);
+    const start = generation;
+    publish('signingout', '正在清除本机连接。', false);
     let saved;
     await vault.withLock(async () => { saved = await vault.get('session'); await vault.clearSession(); });
     // 本机退出先落盘；远程撤销不成功时也不能在下次打开自动恢复旧连接。
     let revoked = !saved;
     if (saved) { try { await client.revoke(saved.clientId, saved.refreshToken); revoked = true; } catch {} }
     const message = revoked ? '已退出云端连接；本机事项和 ChatGPT 的独立连接保留。' : '本机已退出；网络不可用，服务端撤销未确认。';
+    if (start !== generation) return { revoked, message, obsolete: true };
     publish('disconnected', message, false);
     return { revoked, message };
   }

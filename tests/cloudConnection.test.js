@@ -117,6 +117,18 @@ test('退出发生在续期中时，迟到结果不能重新保存或恢复已�
   assert.equal(s.auth.getStatus().state, 'disconnected');
 });
 
+test('旧退出的远程响应晚于新登录时，不能覆盖新的授权状态', async () => {
+  const s = setup(); await authorize(s);
+  const wait = later(); const entered = later();
+  s.client.revoke = async () => { entered.resolve(); return wait.promise; };
+  const logout = s.auth.logout();
+  await entered.promise;
+  await s.auth.login();
+  wait.resolve();
+  assert.equal((await logout).obsolete, true);
+  assert.equal(s.auth.getStatus().state, 'authorizing');
+});
+
 function controllerSetup(api) {
   let subscriber;
   const status = { state: 'connected', remembered: true, message: 'fake connected' };
@@ -146,8 +158,10 @@ test('失败保留成功快照；只有成功空响应显示空列表；手动�
   controller.selectSource('cloud'); await tick();
   await Promise.all([controller.refresh('auto'), controller.refresh('auto')]);
   assert.equal(calls, 1);
+  controller.offline(); await controller.refresh('auto');
+  assert.equal(calls, 2);
   failure = true; setClock(13000); await controller.refresh();
-  assert.equal(calls, 2); assert.deepEqual(controller.getState().items, records);
+  assert.equal(calls, 3); assert.deepEqual(controller.getState().items, records);
   assert.equal(controller.getState().stale, true); assert.equal(controller.getState().readState, 'failed');
   controller.stop();
   let release; let inFlightCalls = 0;

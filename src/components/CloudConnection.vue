@@ -2,8 +2,8 @@
 import { computed } from 'vue';
 const props = defineProps({ state: { type: Object, required: true } });
 defineEmits(['source', 'login', 'logout', 'refresh']);
-const busy = computed(() => ['checking', 'authorizing'].includes(props.state.auth.state));
-const labels = { checking: '恢复连接中', authorizing: '等待授权', connected: '已连接 · 只读', disconnected: '未连接', expired: '授权已到期', offline: '离线／连接待恢复', error: '连接未完成' };
+const busy = computed(() => ['checking', 'authorizing', 'signingout'].includes(props.state.auth.state));
+const labels = { checking: '恢复连接中', authorizing: '等待授权', signingout: '正在退出', connected: '已连接 · 只读', disconnected: '未连接', expired: '授权已到期', offline: '离线／连接待恢复', error: '连接未完成' };
 const lastRead = computed(() => props.state.lastReadAt === null ? '尚未成功读取' : new Date(props.state.lastReadAt).toLocaleString());
 </script>
 
