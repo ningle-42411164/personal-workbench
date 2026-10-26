@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { createTodo, createNote, createRoutine, createImportantDate, createSimpleItem,
-  createProject, updateProject, validateWorkbenchData, isCalendarDate } from '../../../src/data/workbenchData.js';
+  createProject, updateProject, validateWorkbenchData, isCalendarDate, COMPLETABLE_TYPES, toggleTodo } from '../../../src/data/workbenchData.js';
 import { normalizeUserTags } from '../../../src/data/userTags.js';
 import { ApiError } from './errors.js';
 
@@ -20,10 +20,33 @@ export const listSchema = z.object({
 }).strict();
 export const getProjectSchema = z.object({ id: z.string().uuid() }).strict();
 export const createSchema = z.object({
-  requestId, type: itemType, title, tags: tags.optional(), priority: z.boolean().optional(),
+  requestId, id: z.string().uuid().optional(), type: itemType, title, tags: tags.optional(), priority: z.boolean().optional(),
   urgent: z.boolean().optional(), targetDate: date.optional(),
   fields: projectFieldsSchema.omit({ title: true, tags: true }).optional(),
 }).strict();
+const versioned = { requestId, id: z.string().uuid(), expectedVersion: z.number().int().positive() };
+// 同步复用本机 v2 记录，保留离线操作时间和已有项目历史；不是导入任意 JSON 的入口。
+const timestamp = z.string().datetime();
+const snapshotBase = { id: z.string().uuid(), title, tags, createdAt: timestamp, updatedAt: timestamp, priority: z.boolean().optional() };
+export const syncSchema = z.object({ requestId, id: z.string().uuid(), expectedVersion: z.number().int().min(0), item: z.discriminatedUnion('type', [
+  z.object({ ...snapshotBase, type: z.literal('todo'), urgent: z.boolean(), done: z.boolean(), completedAt: timestamp.nullable() }).strict(),
+  z.object({ ...snapshotBase, type: z.literal('project'), status: z.enum(['active', 'paused', 'done']).nullable().optional(), startDate: date.nullable().optional(), dueDate: date.nullable().optional(), currentSituation: z.string().max(10000).optional(), nextStep: z.string().max(10000).optional(), completedAt: timestamp.nullable().optional(), updates: z.array(z.object({ id: z.string().min(1), content: z.string().max(10000), createdAt: timestamp }).strict()).optional() }).strict(),
+]) }).strict();
+
+export function syncItem(input, previous) {
+  const item = { ...input.item, tags: cleanTags(input.item.tags) };
+  if (item.id !== input.id || item.type !== 'project' && !item.title.trim()) throw new ApiError(400, 'INVALID_INPUT', '同步事项内容无效。');
+  if (previous && (item.type !== previous.type || item.createdAt !== previous.createdAt)) throw new ApiError(400, 'IMMUTABLE_FIELD', '同步不能改变原记录的分类或创建时间。');
+  validateWorkbenchData({ schemaVersion: 2, items: [item] });
+  return previous && JSON.stringify(canonical(previous)) === JSON.stringify(canonical(item)) ? previous : item;
+}
+export const itemPatchSchema = z.object({ ...versioned, fields: z.object({
+  title: title.optional(), tags: tags.optional(), priority: z.boolean().optional(), urgent: z.boolean().optional(), targetDate: date.optional(),
+}).strict() }).strict();
+export const completionSchema = z.object({ ...versioned, done: z.boolean() }).strict();
+export const deleteSchema = z.object(versioned).strict();
+const cursor = z.string().regex(/^(0|[1-9][0-9]*)$/).refine(value => Number.isSafeInteger(Number(value)));
+export const changesSchema = z.object({ since: cursor.default('0'), until: cursor.optional(), limit: z.number().int().min(1).max(100).default(100) }).strict();
 export const updateSchema = z.object({
   requestId, id: z.string().uuid(), expectedVersion: z.number().int().positive(), fields: projectFieldsSchema,
 }).strict();
@@ -44,9 +67,28 @@ export function makeItem(input) {
   else if (type === 'project') item = createProject(name, fields ?? {}, now, priority ?? false);
   else item = createSimpleItem(type, name, now, priority ?? false);
   if (priority !== undefined) item.priority = priority;
+  if (input.id) item.id = input.id;
   item.tags = cleanTags(input.tags ?? []);
   validateWorkbenchData({ schemaVersion: 2, items: [item] });
   return item;
+}
+
+export function patchItem(item, fields, references = []) {
+  if (Object.hasOwn(fields, 'urgent') && item.type !== 'todo' || Object.hasOwn(fields, 'targetDate') && item.type !== 'importantDate') throw new ApiError(400, 'INVALID_INPUT', '该分类不支持这些字段。');
+  const next = { ...fields };
+  if (next.title !== undefined) { next.title = next.title.trim(); if (!next.title && item.type !== 'project') throw new ApiError(400, 'INVALID_INPUT', '事项名称不能为空。'); }
+  if (next.tags) next.tags = cleanTags(next.tags);
+  const changed = Object.keys(next).some(key => JSON.stringify(item[key]) !== JSON.stringify(next[key]));
+  if (!changed) return item;
+  const result = { ...item, ...next, updatedAt: new Date().toISOString() };
+  validateWorkbenchData({ schemaVersion: 2, items: [result, ...references] });
+  return result;
+}
+
+export function setCompletion(item, done) {
+  if (!COMPLETABLE_TYPES.includes(item.type)) throw new ApiError(400, 'INVALID_INPUT', '此分类请使用其专用状态接口。');
+  // 明确设为 true/false，而非直接 toggle：不同设备的重复操作不会二次翻转。
+  return Boolean(item.done) === done ? item : toggleTodo(item);
 }
 
 function cleanTags(values) {

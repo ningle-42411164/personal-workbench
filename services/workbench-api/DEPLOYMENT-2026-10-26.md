@@ -114,6 +114,8 @@ ChatGPT 对两个故意错误的可见结果显示：客户端外层为 `INVALID
 
 ## 代码答疑阅读入口
 
+后续批次更新：手机网页 1A、1B 已有真实验收证据；云端授权引导已发布为 `6516d4b`。本批同步接口与日志/墓碑迁移已部署到原免费测试资源，Worker 版本 `3a255fba-31f5-4dac-a34e-e5c94c706f99`。实际自动同步范围、未完成能力、调用链和手机验收入口以仓库 `docs/cloud-sync-batch1-2026-10-26.md` 为准；上文“手机尚未接入”等为初次部署时的历史状态，不代表最新进度。正式事项未导入。
+
 先读 `src/service.js` 的 `create()` 和 `updateProject()`，再读 `src/domain.js` 如何调用本地 `src/data/workbenchData.js`，然后读 `src/store.js` 的事务、版本号与回执。认证从 `src/index.js` → `src/authorization.js`；工具定义在 `src/mcp.js`。
 
 参考：[Cloudflare 官方 OAuth 库](https://github.com/cloudflare/workers-oauth-provider)、[MCP 官方 TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk)、[OpenAI 自定义 MCP 文档](https://developers.openai.com/api/docs/guides/custom-mcp-server)。本批固定 v1 SDK，不混入 v2 API；OAuth 身份、资源 audience、scope 与服务所有者检查各自执行。

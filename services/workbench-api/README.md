@@ -1,9 +1,9 @@
 # Personal Workbench 共享数据服务（第一批）
 
 本目录是独立的 Cloudflare Worker 服务，提供受 OAuth 保护的 MCP 与网页 REST API。
-不调用任何模型 API，不需要购买模型 API Key。现有网页、本地数据和学习注释均未修改。
+不调用任何模型 API，不需要购买模型 API Key。网页接入与学习索引见仓库 `docs/` 的阶段记录。
 
-**状态（2026-10-26）：已部署到本人 Cloudflare Free 隔离测试环境；本机 17 项测试、打包、真实 HTTPS 检查通过；真实 GitHub OAuth 和 ChatGPT 四项工具的读取、确认后创建、项目更新、重放及版本冲突验收通过。现有网页和手机尚未接入，未迁移正式数据。**
+**状态（2026-10-26）：Cloudflare Free 测试环境已接通网页与手机；1B 虚构事项手机↔ChatGPT 数据闭环有真实证据，ChatGPT 回复区仍有“无法加载此回复”的独立故障。下一批已实现待办/项目自动同步底座，真实手机自动同步尚待验收；没有迁移正式事项。**
 
 实际地址、验证证据、修改说明和后续限制见 [部署记录](DEPLOYMENT-2026-10-26.md)。
 
@@ -17,8 +17,10 @@
 | `update_project` | `PATCH /api/projects/:id` | `workbench:read` 和 `workbench:write` |
 
 - 新建支持现有八种类型；项目更新复用 `src/data/workbenchData.js` 的规则与历史逻辑。
-- 无整库替换、删除、任意 SQL、任意脚本或文件操作工具。
-- 当前没有网页登录按钮、同步入口、离线操作队列、数据迁移入口；服务建好不代表手机已接通。
+- MCP 没有删除、整库替换、任意 SQL、任意脚本或文件操作工具。
+- 新网页同步接口：`GET /api/items/:id`、`PATCH /api/items/:id`、`POST /api/items/:id/completion`、`DELETE /api/items/:id`；均要求版本与幂等标识，写入另需 write scope。
+- `GET /api/changes` 返回固定高水位的增量分页及删除标记。`GET /api/sync/items/:id` 返回当前记录或删除标记，`PUT` 仅接受严格校验的待办/项目 v2 快照，保留离线时间与现有历史。新建 expectedVersion=0；更新必须匹配当前版本，分类与创建时间不可改变。
+- 网页已增加独立 IndexedDB 事务队列和首次纳入预览；初次纳入正式事项仍需用户明确确认。详见 `docs/cloud-sync-batch1-2026-10-26.md`。
 - 正式事项 JSON 继续使用现有 v2 字段；服务端单独维护版本号和去重回执，不写回浏览器。
 - 当前版本只用于新建的测试数据库。接入正式数据前，需核对 Windows 最新源码及旧备份兼容性。
 
@@ -52,6 +54,7 @@ SDK 版本固定在仍维护的 v1.32.2，采用 Web Standards Streamable HTTP �
 | `src/store.js` | D1 数据持久化、原子版本检查、去重回执 |
 | `src/errors.js` | 返回可理解的错误，不泄漏数据库原始错误 |
 | `migrations/0001_initial.sql` | 新测试库的事项表和回执表，不修改任何旧浏览器数据 |
+| `migrations/0002_sync_foundation.sql` | 增量日志、删除标记，以及已有云端测试记录的初始快照；不导入本机数据 |
 
 写入调用链：
 
@@ -105,7 +108,7 @@ SDK 版本固定在仍维护的 v1.32.2，采用 Web Standards Streamable HTTP �
 REST 接口、真实 MCP SDK 客户端、授权页面转义和本地 workerd OAuth/D1 完整链路。
 
 本次已实际验收 Cloudflare Free 测试资源、真实 GitHub OAuth、ChatGPT 工具发现、读写前确认和重复/冲突处理。
-仍未完成：手机页面集成、离线队列、删除同步、正式数据首次迁移、服务限流/防滥用配置和运行监控。
+仍未完成：真实手机首批自动同步验收、其他分类与随笔转换同步、正式数据首次纳入、服务限流/防滥用配置和运行监控。页面关闭后不承诺后台运行；恢复联网、回到前台及页面打开时定时同步。
 另有固定依赖版本的审计告警，详见部署记录；本次未自动升级或执行强制修复。
 
 数据库回执目前不自动过期，避免过期后旧请求再次创建。正式使用前需要确定回执保留与去重窗口。

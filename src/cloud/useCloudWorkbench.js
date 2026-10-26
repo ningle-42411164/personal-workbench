@@ -6,6 +6,8 @@ import { createCloudWrites } from './cloudWrites.js';
 
 const auth = createCloudAuth();
 const api = createWorkbenchApi({ auth });
+// 同一公共客户端会话供测试视图和正常首页同步使用，令牌仍由 auth 管理。
+export { auth as sharedCloudAuth };
 const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('personal-workbench.cloud-connection.v1') : null;
 export const cloudWorkbench = createCloudController({
   auth, api,

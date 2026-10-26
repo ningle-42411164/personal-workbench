@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, ref } from 'vue';
+import { nextTick, ref, onBeforeUnmount } from 'vue';
 import { renameItem } from '../data/workbenchData.js';
 
 const props = defineProps({
@@ -9,11 +9,13 @@ const props = defineProps({
   ellipsis: { type: Boolean, default: false },
   saveItem: { type: Function, required: true },
 });
-const emit = defineEmits(['expand', 'complete', 'delete']);
+const emit = defineEmits(['expand', 'complete', 'delete', 'editing']);
 const editing = ref(false);
 const draft = ref('');
 const inputControl = ref(null);
 const error = ref('');
+const saving = ref(false);
+let editingBase;
 
 function formatTime(value) {
   const date = new Date(value);
@@ -22,17 +24,27 @@ function formatTime(value) {
 }
 async function beginEdit() {
   draft.value = props.item.title;
+  editingBase = JSON.parse(JSON.stringify(props.item));
+  emit('editing', props.item.id, editingBase);
   error.value = '';
   editing.value = true;
   await nextTick();
   inputControl.value?.focus();
 }
-function saveName() {
+async function saveName() {
+  if (saving.value) return;
   const name = draft.value.trim();
   if (!name) { error.value = '请填写事项名称。'; return; }
   // 只改原事项名称，保留分类、创建时间、完成状态和转化关联。
-  if (name === props.item.title || props.saveItem(renameItem(props.item, name))) editing.value = false;
+  // 等本机事务提交再退出编辑；编辑期间外部变化由父组件比较原版本，不能悄悄覆盖。
+  saving.value = true;
+  try {
+    if (name === props.item.title || await props.saveItem(renameItem(editingBase, name), editingBase)) { editing.value = false; emit('editing', props.item.id, null); }
+    else error.value = '保存未完成，输入保留；请核对是否有其他窗口或云端修改。';
+  } finally { saving.value = false; }
 }
+function cancelName() { if (!saving.value) { editing.value = false; emit('editing', props.item.id, null); } }
+onBeforeUnmount(() => emit('editing', props.item.id, null));
 </script>
 
 <template>
@@ -49,7 +61,7 @@ function saveName() {
       <form v-if="editing" class="ordinary-name-editor" @submit.prevent="saveName">
         <input ref="inputControl" v-model="draft" aria-label="事项名称" maxlength="150" :disabled="!canEdit">
         <p v-if="error" class="error" role="alert">{{ error }}</p>
-        <div class="form-buttons"><button type="button" class="secondary" @click="editing = false">取消</button><button :disabled="!canEdit">保存</button></div>
+        <div class="form-buttons"><button type="button" class="secondary" :disabled="saving" @click="cancelName">取消</button><button :disabled="!canEdit || saving">保存</button></div>
       </form>
       <template v-else>
         <div class="detail-actions"><button type="button" class="text-button danger delete-button" :disabled="!canEdit" @click="emit('delete')">删除</button><button type="button" class="secondary edit-button" :disabled="!canEdit" @click="beginEdit">编辑</button></div>

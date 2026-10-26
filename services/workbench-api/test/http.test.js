@@ -61,6 +61,8 @@ test('真实MCP SDK客户端完成初始化、工具发现、创建、查询和�
   await client.connect(transport); t.after(() => client.close());
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map(tool => tool.name), ['list_items', 'get_project', 'create_item', 'update_project']);
+  assert.ok(tools.every(tool => tool.outputSchema?.type === 'object'));
+  assert.deepEqual(tools.find(tool => tool.name === 'list_items').outputSchema.required.sort(), ['items', 'nextOffset']);
   assert.equal(tools.find(tool => tool.name === 'list_items').annotations.readOnlyHint, true);
   assert.equal(tools.find(tool => tool.name === 'create_item').annotations.readOnlyHint, false);
   const created = await client.callTool({ name: 'create_item', arguments: { requestId: 'mcp-create-1', type: 'project', title: 'MCP项目' } });
@@ -73,6 +75,8 @@ test('真实MCP SDK客户端完成初始化、工具发现、创建、查询和�
   assert.equal(updated.structuredContent.version, 2);
   const listed = await client.callTool({ name: 'list_items', arguments: {} });
   assert.equal(listed.structuredContent.items[0].item.currentSituation, 'MCP更新');
+  assert.deepEqual(JSON.parse(listed.content[0].text), listed.structuredContent);
+  assert.ok(Buffer.byteLength(JSON.stringify(listed), 'utf8') < 8192);
 });
 
 test('MCP只读令牌调用写工具返回权限错误，不执行写入', async t => {

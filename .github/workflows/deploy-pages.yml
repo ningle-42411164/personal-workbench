@@ -27,6 +27,14 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Install API integration dependencies
+        working-directory: services/workbench-api
+        run: npm ci --ignore-scripts
+      - name: Test shared API and Worker
+        working-directory: services/workbench-api
+        run: |
+          npm test
+          npm run check
       - name: Test local data and isolated cloud operations
         run: npm test
       - name: Build site

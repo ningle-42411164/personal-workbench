@@ -24,6 +24,17 @@ test('同字段重入不重置；切换字段先保存实际改动，仅当前�
   assert.equal(s.project.nextStep, '新的下一步'); assert.equal(s.project.updates.length, 2);
 });
 
+test('编辑期间同一字段被云端更新时保留输入并阻止自动覆盖，其他字段变化仍可合并', async () => {
+  const s = setup(); await s.editor.begin('currentSituation'); s.state.draft = '未提交的本机输入';
+  s.project.currentSituation = '云端新推进';
+  assert.equal(await s.editor.commit(), false); assert.equal(s.writes, 0);
+  assert.equal(s.state.draft, '未提交的本机输入'); assert.equal(s.state.field, 'currentSituation');
+  assert.match(s.state.error, /云端修改|云端修改|其他窗口或云端/);
+  s.editor.cancel(); await s.editor.begin('nextStep'); s.state.draft = '本机下一步';
+  s.project.currentSituation = '云端另一个字段';
+  assert.equal(await s.editor.commit(), true); assert.equal(s.project.currentSituation, '云端另一个字段');
+});
+
 test('保存失败阻止切字段、关闭和完成，保留输入及编辑状态；恢复后可重试', async () => {
   const s = setup(); await s.editor.begin('currentSituation'); s.state.draft = '失败也应保留'; s.controls.fail = true;
   assert.equal(await s.editor.begin('nextStep'), false);

@@ -41,7 +41,7 @@ function withHeaders(response, origin, allowCors) {
   if (allowCors && origin) {
     headers.set('Access-Control-Allow-Origin', origin);
     headers.append('Vary', 'Origin');
-    headers.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+    headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, MCP-Protocol-Version, MCP-Session-Id');
     headers.set('Access-Control-Expose-Headers', 'WWW-Authenticate, MCP-Session-Id');
   }

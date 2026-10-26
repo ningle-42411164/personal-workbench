@@ -24,7 +24,7 @@ const lastRead = computed(() => props.state.lastReadAt === null ? '尚未成功�
       </div>
       <span class="connection-label" role="status">{{ labels[state.auth.state] || '未连接' }}{{ state.auth.state === 'connected' ? (state.auth.canWrite ? ' · 测试读写' : ' · 只读') : '' }}</span>
     </div>
-    <p>{{ state.source === 'local' ? '当前设备的事项照常使用，无需登录。' : '独立云端测试：仅手动新建待办和编辑项目，不上传本机事项；尚无离线同步。' }}</p>
+    <p>{{ state.source === 'local' ? '当前设备的事项照常使用，无需登录。自动同步在下方单独开启。' : '此页为独立云端测试视图。正常首页的自动同步在下方设置，已有本机事项需预览确认后才纳入。' }}</p>
     <div class="cloud-actions">
       <button v-if="state.auth.state !== 'connected'" class="secondary" type="button" :disabled="busy" @click="requestLogin()">{{ state.auth.state === 'expired' ? '重新授权' : '登录云端' }}</button>
       <button v-if="state.source === 'cloud' && !state.auth.canWrite" class="secondary" type="button" :disabled="busy" @click="requestLogin(true)">授权云端测试写入</button>
@@ -38,7 +38,7 @@ const lastRead = computed(() => props.state.lastReadAt === null ? '尚未成功�
       <button type="button" class="secondary" :disabled="busy" @click="$emit('resume')">已在浏览器完成，检查连接</button>
     </div>
     <p class="cloud-note">{{ state.auth.message }}</p>
-    <p v-if="state.source === 'cloud'" class="cloud-note">最后成功读取：{{ lastRead }}。返回前台或恢复联网时会尝试读取；不自动写入。</p>
+    <p v-if="state.source === 'cloud'" class="cloud-note">测试视图最后成功读取：{{ lastRead }}。返回前台或恢复联网时会尝试读取；此视图的写入仍需确认。</p>
     <p v-if="state.message" class="cloud-message" role="status">{{ state.message }}</p>
     <p v-if="state.stale" class="cloud-stale" role="status">离线／内容可能已过期。下面保留的是此前成功读取的快照。</p>
   </section>

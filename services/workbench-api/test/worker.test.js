@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare, createFetchMock } from 'miniflare';
+import { createTodo } from '../../../src/data/workbenchData.js';
 
 const base = 'https://workbench.test';
 const cookies = response => response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
@@ -32,8 +33,10 @@ test('本地 workerd：OAuth授权码+PKCE、未认证拦截及真实D1读写完
   t.after(() => mf.dispose());
   const call = (path, init = {}) => mf.dispatchFetch(`${base}${path}`, { redirect: 'manual', ...init });
   const db = await mf.getD1Database('DB');
-  const sql = readFileSync(new URL('../migrations/0001_initial.sql', import.meta.url), 'utf8');
-  await db.batch(sql.split(';').filter(statement => statement.trim()).map(statement => db.prepare(statement)));
+  for (const name of readdirSync(new URL('../migrations/', import.meta.url)).filter(name => name.endsWith('.sql')).sort()) {
+    const sql = readFileSync(new URL('../migrations/' + name, import.meta.url), 'utf8');
+    await db.batch(sql.split(';').filter(statement => statement.trim()).map(statement => db.prepare(statement)));
+  }
 
   const unauthenticated = await call('/mcp', { method: 'POST', body: '{}' });
   assert.equal(unauthenticated.status, 401);
@@ -147,6 +150,23 @@ test('本地 workerd：OAuth授权码+PKCE、未认证拦截及真实D1读写完
       fields: { currentSituation: suffix } }),
   })));
   assert.deepEqual(competing.map(response => response.status).sort(), [200, 409]);
+  // 新同步接口在真实 workerd/D1 中验证；不只测试纯 JS 路由。
+  const offlineTodo = createTodo('虚构自动同步运行测试', true, '2026-10-25T08:00:00.000Z');
+  const syncPath = `/api/sync/items/${offlineTodo.id}`;
+  const syncPreflight = await call(syncPath, { method: 'OPTIONS', headers: { Origin: 'https://ningle-42411164.github.io', 'Access-Control-Request-Method': 'PUT' } });
+  assert.equal(syncPreflight.status, 204); assert.match(syncPreflight.headers.get('Access-Control-Allow-Methods'), /PUT/);
+  const snapshotBody = JSON.stringify({ requestId: 'runtime-offline-snapshot', expectedVersion: 0, item: offlineTodo });
+  const snapshotResponse = await call(syncPath, { method: 'PUT', headers: auth, body: snapshotBody });
+  assert.equal(snapshotResponse.status, 200, await snapshotResponse.clone().text());
+  const synced = await snapshotResponse.json(); assert.deepEqual(synced.item, offlineTodo);
+  assert.deepEqual(await (await call(syncPath, { method: 'PUT', headers: auth, body: snapshotBody })).json(), synced);
+  const doneResponse = await call(`/api/items/${offlineTodo.id}/completion`, { method: 'POST', headers: auth, body: JSON.stringify({ requestId: 'runtime-explicit-complete', expectedVersion: 1, done: true }) });
+  assert.equal(doneResponse.status, 200); assert.equal((await doneResponse.json()).item.done, true);
+  const removal = await call(`/api/items/${offlineTodo.id}`, { method: 'DELETE', headers: auth, body: JSON.stringify({ requestId: 'runtime-sync-delete', expectedVersion: 2 }) });
+  assert.equal(removal.status, 200);
+  assert.deepEqual(await (await call(syncPath, { headers: auth })).json(), { id: offlineTodo.id, version: 3, deleted: true });
+  const changes = await (await call('/api/changes?since=0', { headers: auth })).json();
+  assert.equal(changes.changes.at(-1).deleted, true);
   const reusedCallback = await call(callbackPath, { headers: { Cookie: cookies(approval) } });
   assert.equal(reusedCallback.status, 400);
   assert.equal((await reusedCallback.json()).diagnostic.category, 'transaction_expired_or_used');

@@ -10,13 +10,17 @@ const props = defineProps({
 const emit = defineEmits(['close']);
 const draft = ref({ title: '', status: '', tags: [], startDate: '', dueDate: '', currentSituation: '', nextStep: '' });
 const error = ref('');
-function save() {
+const saving = ref(false);
+async function save() {
+  if (saving.value) return;
+  saving.value = true;
   try {
     const { title, ...fields } = draft.value;
-    if (props.saveProject(createProject(title, fields))) emit('close');
+    // 事务保存是异步的；收到成功结果后才关闭，不能把 Promise 当作 true。
+    if (await props.saveProject(createProject(title, fields))) emit('close');
   } catch (cause) {
     error.value = cause.message;
-  }
+  } finally { saving.value = false; }
 }
 </script>
 
@@ -29,6 +33,6 @@ function save() {
     <fieldset class="project-tag-picker"><legend>用户标签</legend><p v-if="!availableTags.length" class="empty">当前没有已保存的用户标签。</p><div class="project-choice-list"><label v-for="tag in availableTags" :key="tag"><input v-model="draft.tags" type="checkbox" :value="tag" :disabled="!canEdit">#{{ tag.replace(/^#+/, '') }}</label></div></fieldset>
     <div class="project-date-fields"><label>开始日期<input v-model="draft.startDate" type="date" :disabled="!canEdit"></label><label>预计截止日期<input v-model="draft.dueDate" type="date" :disabled="!canEdit"></label></div>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
-    <div class="form-buttons"><button type="button" class="secondary" @click="emit('close')">取消</button><button :disabled="!canEdit">保存</button></div>
+    <div class="form-buttons"><button type="button" class="secondary" :disabled="saving" @click="emit('close')">取消</button><button :disabled="!canEdit || saving">保存</button></div>
   </form>
 </template>

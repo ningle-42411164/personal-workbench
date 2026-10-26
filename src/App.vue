@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useRegisterSW } from 'virtual:pwa-register/vue';
 import LaunchSplash from './components/LaunchSplash.vue';
 import ProjectDialog from './components/ProjectDialog.vue';
@@ -8,14 +8,20 @@ import OrdinaryItem from './components/OrdinaryItem.vue';
 import CloudConnection from './components/CloudConnection.vue';
 import CloudReadOnly from './components/CloudReadOnly.vue';
 import CloudWrites from './components/CloudWrites.vue';
+import SyncSettings from './components/SyncSettings.vue';
+import { useSyncWorkbench } from './sync/useSyncWorkbench.js';
+import { equal } from './sync/syncStore.js';
 import { useCloudWorkbench } from './cloud/useCloudWorkbench.js';
 import { availableUserTags } from './data/userTags.js';
 import { readSplashEnabled, writeSplashEnabled } from './data/splashPreference.js';
-import { COMPLETABLE_TYPES, comparePriorityThenNewest, convertNote, createImportantDate, createNote, createRoutine, createSimpleItem, createTodo, daysUntil, emptyWorkbenchData, isCalendarDate, readWorkbenchData, removeItem, renameItem, toggleTodo, validateWorkbenchData, writeWorkbenchData } from './data/workbenchData.js';
+import { COMPLETABLE_TYPES, comparePriorityThenNewest, convertNote, createImportantDate, createNote, createRoutine, createSimpleItem, createTodo, daysUntil, emptyWorkbenchData, isCalendarDate, readWorkbenchData, removeItem, renameItem, toggleTodo, validateWorkbenchData } from './data/workbenchData.js';
 
-// 云端状态单独维护；下面原有 workbenchData/saveTasks 始终只操作本机事项。
+// 独立云端测试视图仍保留；正常首页通过本机事务队列同步已明确纳入的事项。
 const cloud = useCloudWorkbench();
 const cloudState = cloud.state;
+const sync = useSyncWorkbench();
+const syncSnapshot = sync.snapshot;
+const syncStatus = sync.status;
 const splashEnabled = ref(readSplashEnabled());
 // 进入时先决定是否挂载动画；开关修改影响下一次进入，已挂载动画仍按原会话/关闭逻辑运行。
 //readSplashEnabled()读取浏览器本地存储的启动动画开关状态，返回 true 或 false
@@ -36,8 +42,18 @@ function toggleSplashPreference() {
 
 // 唯一的持久化数据入口：保存成功后替换 .value，Vue 会更新依赖它的列表，不需要手动改 DOM。
 const workbenchData = ref(emptyWorkbenchData());
+// 编辑中的普通事项固定留在原分组；云端完成/删除不能卸载控件并丢掉尚未提交的输入。
+const editingOrdinary = ref({});
+const viewItems = computed(() => [
+  ...workbenchData.value.items.map(item => editingOrdinary.value[item.id] ?? item),
+  ...Object.values(editingOrdinary.value).filter(item => !workbenchData.value.items.some(current => current.id === item.id)),
+]);
+function protectOrdinary(id, item) {
+  if (item) editingOrdinary.value = { ...editingOrdinary.value, [id]: item };
+  else { const next = { ...editingOrdinary.value }; delete next[id]; editingOrdinary.value = next; }
+}
 // computed 是“从已有数据算出结果”，不是第二份数据库；items 改变时，这个待办视图也会重新计算。
-const tasks = computed(() => workbenchData.value.items.filter(item => item.type === 'todo'));
+const tasks = computed(() => viewItems.value.filter(item => item.type === 'todo'));
 const title = ref('');//保存输入框当前的文字。
 const urgent = ref(false);//保存“急需处理”复选框是否勾选。
 const message = ref('');//保存需要展示给用户的错误提示
@@ -72,9 +88,11 @@ const conversionDate = ref('');
 const selectedTodoId = ref(null);
 const selectedDetailId = ref(null);
 const selectedProjectId = ref(null);
+const projectAtOpen = ref(null);
 const projectDialog = ref(null);
 // 唯一详情从完整集合取项目，完成/恢复改变分组也不会先卸载编辑器。
-const selectedProject = computed(() => workbenchData.value.items.find(item => item.type === 'project' && item.id === selectedProjectId.value));
+const selectedProject = computed(() => selectedProjectId.value && (workbenchData.value.items.find(item => item.type === 'project' && item.id === selectedProjectId.value)
+  ?? (projectAtOpen.value?.id === selectedProjectId.value ? projectAtOpen.value : null)));
 const showCompleted = ref(false);
 const showProjects = ref(true);
 const showOpenTodos = ref(true);
@@ -85,19 +103,28 @@ const pendingFileName = ref('');
 const { offlineReady, needRefresh, updateServiceWorker } = useRegisterSW();
 
 // 浏览器保存的数据需要先校验，读取失败时不能悄悄覆盖旧数据。
-const storageReadable = ref(true);
+const storageReadable = ref(false);
+const localSaving = ref(false);
+const canEditLocal = computed(() => storageReadable.value && !localSaving.value);
+let localRevision = -1;
 try {
-  workbenchData.value = readWorkbenchData();//正常情况下才会执行这个
+  workbenchData.value = readWorkbenchData();//先显示旧 v2 备份；事务存储就绪后才开放编辑。
 } catch (error) {
   storageReadable.value = false;
   message.value = error.message;
 }
+watch(syncSnapshot, next => {
+  if (next && next.revision !== localRevision) { workbenchData.value = next.data; localRevision = next.revision; }
+});
+void sync.initialize().then(next => {
+  workbenchData.value = next.data; localRevision = next.revision; storageReadable.value = true;
+}).catch(error => { storageReadable.value = false; message.value = error.message; });
 
 // filter 先生成新数组，再 sort 排序，所以首页分组不会直接重排持久化的 items。
 const routines = computed(() => workbenchData.value.items.filter(item => item.type === 'routine'));
 const importantDates = computed(() => workbenchData.value.items.filter(item => item.type === 'importantDate').sort(comparePriorityThenNewest));
 const openTodos = computed(() => tasks.value.filter(task => !task.done).sort((a, b) => Number(Boolean(b.priority)) - Number(Boolean(a.priority)) || Number(b.urgent) - Number(a.urgent) || b.createdAt.localeCompare(a.createdAt)));
-const completedTodos = computed(() => workbenchData.value.items.filter(item => COMPLETABLE_TYPES.includes(item.type) && item.done).sort((a, b) => b.completedAt.localeCompare(a.completedAt)));
+const completedTodos = computed(() => viewItems.value.filter(item => COMPLETABLE_TYPES.includes(item.type) && item.done).sort((a, b) => b.completedAt.localeCompare(a.completedAt)));
 const projects = computed(() => workbenchData.value.items.filter(item => item.type === 'project' && item.status !== 'done').sort(comparePriorityThenNewest));
 const completedProjects = computed(() => workbenchData.value.items.filter(item => item.type === 'project' && item.status === 'done').sort((a, b) => b.completedAt.localeCompare(a.completedAt)));
 const completedCount = computed(() => completedTodos.value.length + completedProjects.value.length);
@@ -106,7 +133,7 @@ const visibleOpenTodos = computed(() => showOpenTodos.value ? openTodos.value : 
 const availableProjectTags = computed(() => availableUserTags(workbenchData.value.items));
 // 已完成只改变原记录的状态，不搬到另一份数据；这里筛走 done 的事项，已完成区再筛出它们。
 function categoryItems(type) {
-  return workbenchData.value.items.filter(item => item.type === type && !item.done).sort((a, b) =>
+  return viewItems.value.filter(item => item.type === type && !item.done).sort((a, b) =>
     type === 'note' ? Number(Boolean(a.convertedToId)) - Number(Boolean(b.convertedToId)) || b.createdAt.localeCompare(a.createdAt)
       : comparePriorityThenNewest(a, b));
 }
@@ -137,6 +164,7 @@ onBeforeUnmount(() => {
 async function toggleProjectDetails(id) {
   // 切换项目也经过同一保存检查；原生模态外壳会阻止直接操作背景列表。
   if (selectedProjectId.value && !await projectDialog.value?.saveBeforeLeave()) return;
+  projectAtOpen.value = workbenchData.value.items.find(item => item.id === id) ?? null;
   selectedProjectId.value = selectedProjectId.value === id ? null : id;
 }
 
@@ -150,25 +178,27 @@ function countdownText(targetDate) {
 }
 
 // 先确认保存成功，再更新页面，避免出现“看似保存但实际丢失”。
-//这个saveTasks起保存数据到浏览器上面的功能（顺带同步 Vue 响应式状态；这里不是数据库）
-function saveTasks(nextTasks) {//nextTasks是这个函数接收的参数
-  if (!storageReadable.value) return false;
+// 这个 saveTasks 仍负责浏览器保存和 Vue 状态；现在等待 IndexedDB 把事项与队列一起提交。
+// 网络发送在保存成功之后自动安排，断网不影响本机事务成功。
+async function saveTasks(nextTasks) {//nextTasks是这个函数接收的参数
+  if (!canEditLocal.value) return false;
+  localSaving.value = true;
   try {
     const nextData = { ...workbenchData.value, items: nextTasks };
-    writeWorkbenchData(nextData);//把完整的 2.0 数据保存到浏览器上面
-    workbenchData.value = nextData;//保存成功后再更新页面
+    const saved = await sync.save(nextData, localRevision);//仍保存完整 v2 内容，队列存放在独立元数据中。
+    workbenchData.value = saved.data; localRevision = saved.revision;//事务成功后再更新页面
     message.value = '';
     return true;
-  } catch {
-    message.value = '保存失败，请检查浏览器是否允许本地存储。';
+  } catch (error) {
+    message.value = error.message || '保存失败，请检查浏览器是否允许本地存储。';
     return false;
-  }
+  } finally { localSaving.value = false; }
 }
 
 // 学习笔记（第一步的写法）：
 //创建新任务task后，把新任务和旧任务（...tasks.value）一起丢给saveTasks保存到浏览器
 // 2.0 现在把各种类型的事项放在同一个 items 数组中。
-function addTask() {
+async function addTask() {
   // default 是路由模式而非事项类型；明确选择类型后，复选框只控制 priority，不把分类改成 todo。
   if (quickType.value !== 'project' && !title.value.trim()) { message.value = '请先填写记录内容。'; return; }//非空字符串在 JS 里算 true,trim()删掉了title.value两端的空格之后，再！判断是否ture
   if (quickType.value === 'importantDate' && !isCalendarDate(quickTargetDate.value)) {
@@ -183,7 +213,7 @@ function addTask() {
       ? createImportantDate(title.value.trim(), quickTargetDate.value, now, needProcessing.value)
       : createSimpleItem(quickType.value, title.value.trim(), now, needProcessing.value);
   // 先生成新数组交给保存入口，只有返回 true 才清空草稿，失败时输入还留在页面上。
-  if (saveTasks([...workbenchData.value.items, item])) {
+  if (await saveTasks([...workbenchData.value.items, item])) {
     title.value = '';
     needProcessing.value = false;
     urgent.value = false;
@@ -213,12 +243,12 @@ function openCategoryForm(type) {
   categoryTitle.value = '';
 }
 
-function addCategoryItem() {
+async function addCategoryItem() {
   if (!categoryTitle.value.trim()) { message.value = '请先填写内容。'; return; }
   const item = addingCategory.value === 'note'
     ? createNote(categoryTitle.value.trim()) : addingCategory.value === 'todo'
       ? createTodo(categoryTitle.value.trim(), false) : createSimpleItem(addingCategory.value, categoryTitle.value.trim());
-  if (saveTasks([...workbenchData.value.items, item])) {
+  if (await saveTasks([...workbenchData.value.items, item])) {
     categoryTitle.value = '';
     addingCategory.value = null;
   }
@@ -230,10 +260,10 @@ function openNoteDetails(item) {
   conversionDate.value = '';
 }
 
-function saveNoteConversion() {
+async function saveNoteConversion() {
   try {
     const nextItems = convertNote(workbenchData.value.items, selectedNoteId.value, conversionType.value, conversionDate.value);
-    if (saveTasks(nextItems)) selectedNoteId.value = null;
+    if (await saveTasks(nextItems)) selectedNoteId.value = null;
   } catch (error) {
     message.value = error.message;
   }
@@ -246,15 +276,18 @@ function toggleTask(id) {
 }
 // { ...task }展开task属性；完成状态与完成时间一起改变。
 
-function saveOrdinaryItem(nextItem) {
+function saveOrdinaryItem(nextItem, editingBase) {
+  if (editingBase && !equal(workbenchData.value.items.find(item => item.id === nextItem.id), editingBase)) {
+    message.value = '此事项在编辑期间发生变化，输入保留，请核对新内容。'; return false;
+  }
   return saveTasks(workbenchData.value.items.map(item => item.id === nextItem.id ? nextItem : item));
 }
 
 // 项目详情只负责生成新记录；沿用页面的“先写入、后更新”保存顺序。
-function saveProject(nextProject) {
+async function saveProject(nextProject) {
   // find 确认原项目仍存在；详情组件提出新值，由父组件统一负责实际持久化。
   const previous = workbenchData.value.items.find(item => item.id === nextProject.id && item.type === 'project');
-  if (!previous || !saveTasks(workbenchData.value.items.map(item => item.id === nextProject.id ? nextProject : item))) return false;
+  if (!previous || !await saveTasks(workbenchData.value.items.map(item => item.id === nextProject.id ? nextProject : item))) return false;
   // 外壳在所有编辑保存成功后决定是否关闭；这里不因状态分组变化提前卸载草稿。
   return true;
 }
@@ -271,7 +304,7 @@ function closeRoutineForm() {
   routineTitle.value = '';
 }
 
-function saveRoutine() {
+async function saveRoutine() {
   if (!routineTitle.value.trim()) { message.value = '请先填写日常持续事项。'; return; }
   const nextItems = editingRoutineId.value
     ? workbenchData.value.items.map(item => {
@@ -280,14 +313,14 @@ function saveRoutine() {
       return renameItem(routine, routineTitle.value.trim());
     })
     : [...workbenchData.value.items, createRoutine(routineTitle.value.trim())];
-  if (saveTasks(nextItems)) closeRoutineForm();
+  if (await saveTasks(nextItems)) closeRoutineForm();
 }
 
-function deleteRoutine(id) {
-  if (deleteItem(id)) closeRoutineForm();
+async function deleteRoutine(id) {
+  if (await deleteItem(id)) closeRoutineForm();
 }
 
-function deleteItem(id) {
+async function deleteItem(id) {
   const item = workbenchData.value.items.find(candidate => candidate.id === id);
   if (!item || !storageReadable.value) return false;
   const typeLabel = { todo: '一次性待办', note: '随笔', routine: '日常持续', importantDate: '重要日', project: '项目', waiting: '等待中', creation: '娱乐/创作', shopping: '购物' }[item.type];
@@ -295,7 +328,7 @@ function deleteItem(id) {
   const linkedNote = workbenchData.value.items.some(candidate => candidate.type === 'note' && candidate.convertedToId === id);
   const linkNotice = linkedNote ? '\n关联随笔会恢复为“未录入”，不会被删除。' : '';
   if (!window.confirm(`确定删除${typeLabel}“${item.title}”（创建于 ${new Date(item.createdAt).toLocaleString()}）吗？${linkNotice}\n此操作不能撤销。`)) return false;
-  if (!saveTasks(removeItem(workbenchData.value.items, id))) return false;
+  if (!await saveTasks(removeItem(workbenchData.value.items, id))) return false;
   selectedTodoId.value = null;
   selectedDetailId.value = null;
   selectedProjectId.value = null;
@@ -303,9 +336,9 @@ function deleteItem(id) {
   return true;
 }
 
-function addImportantDate() {
+async function addImportantDate() {
   if (!importantTitle.value.trim() || !importantTargetDate.value) { message.value = '请填写重要日名称和目标日期。'; return; }
-  if (saveTasks([...workbenchData.value.items, createImportantDate(importantTitle.value.trim(), importantTargetDate.value)])) {
+  if (await saveTasks([...workbenchData.value.items, createImportantDate(importantTitle.value.trim(), importantTargetDate.value)])) {
     importantTitle.value = '';
     importantTargetDate.value = '';
     showImportantForm.value = false;
@@ -347,16 +380,16 @@ async function chooseBackup(event) {
   }
 }
 
-function confirmImport() {
+async function confirmImport() {
   if (!storageReadable.value || !pendingImport.value) return;
   try {
     // 用户确认也不等于成功：必须写入成功，才替换响应式数据并显示成功提示。
-    writeWorkbenchData(pendingImport.value);
-    workbenchData.value = pendingImport.value;
+    const saved = await sync.save(pendingImport.value, localRevision, { importing: true });
+    workbenchData.value = saved.data; localRevision = saved.revision;
     pendingImport.value = null;
     message.value = '备份导入成功，当前记录已替换。';
-  } catch {
-    message.value = '导入未完成：浏览器保存失败，原记录保留。请检查本地存储是否可用。';
+  } catch (error) {
+    message.value = error.message || '导入未完成：浏览器保存失败，原记录保留。请检查本地存储是否可用。';
   }
 }
 </script>
@@ -367,6 +400,7 @@ function confirmImport() {
     <div class="page-status">
       <span v-if="offlineReady" role="status">页面资源已缓存。</span>
       <span>{{ cloudState.source === 'local' ? '记录保存在当前设备。' : '正在查看独立云端测试数据，本机事项不变。' }}</span>
+      <span v-if="syncSnapshot?.enabled" role="status">{{ syncStatus.message }}</span>
     </div>
     <header><span class="eyebrow">Personal Workbench</span><h1>欢迎回来，从哪里开始干活？</h1></header>
     <div v-if="needRefresh" class="notice">有新版本可用。<button @click="updateServiceWorker()">更新应用</button></div>
@@ -374,23 +408,23 @@ function confirmImport() {
       <CloudWrites :state="cloud.writes.value" :connection="cloudState" :writer="cloud.writer" />
       <CloudReadOnly :state="cloudState" @edit-project="cloud.writer.openProject" />
     </template>
-    <!-- 本机视图保留原读写和导入导出；云端结果没有调用这些保存入口。 -->
+    <!-- 原首页继续使用同一个 v2 集合；已纳入事项由本机事务队列自动同步，独立测试视图不调用 saveTasks。 -->
     <template v-else>
     <section class="routine-strip" aria-label="日常持续">
       <div class="routine-strip-head">
         <div class="routine-chips">
-          <button v-for="(item, index) in routines" :key="item.id" type="button" class="routine-chip" :disabled="!storageReadable" :aria-label="`编辑日常持续：${item.title}`" @click="openRoutineForm(item)">{{ item.title }}<span v-if="index < routines.length - 1" class="routine-separator" aria-hidden="true"> /</span></button>
+          <button v-for="(item, index) in routines" :key="item.id" type="button" class="routine-chip" :disabled="!canEditLocal" :aria-label="`编辑日常持续：${item.title}`" @click="openRoutineForm(item)">{{ item.title }}<span v-if="index < routines.length - 1" class="routine-separator" aria-hidden="true"> /</span></button>
           <span v-if="!routines.length" class="routine-empty">还没有日常提醒</span>
         </div>
-        <button type="button" class="mini-add" :disabled="!storageReadable" :aria-label="showRoutineForm ? '关闭日常持续编辑' : '添加日常持续'" :aria-expanded="showRoutineForm" @click="showRoutineForm ? closeRoutineForm() : openRoutineForm()">{{ showRoutineForm ? '×' : '+' }}</button>
+        <button type="button" class="mini-add" :disabled="!canEditLocal" :aria-label="showRoutineForm ? '关闭日常持续编辑' : '添加日常持续'" :aria-expanded="showRoutineForm" @click="showRoutineForm ? closeRoutineForm() : openRoutineForm()">{{ showRoutineForm ? '×' : '+' }}</button>
       </div>
       <form v-if="showRoutineForm" class="routine-editor" @submit.prevent="saveRoutine">
         <label for="routine-title">名称</label>
-        <input id="routine-title" v-model="routineTitle" maxlength="150" placeholder="添加一条日常提醒" :disabled="!storageReadable">
+        <input id="routine-title" v-model="routineTitle" maxlength="150" placeholder="添加一条日常提醒" :disabled="!canEditLocal">
         <div class="form-buttons">
-          <button v-if="editingRoutineId" type="button" class="text-button danger delete-button" :disabled="!storageReadable" @click="deleteRoutine(editingRoutineId)">删除</button>
+          <button v-if="editingRoutineId" type="button" class="text-button danger delete-button" :disabled="!canEditLocal" @click="deleteRoutine(editingRoutineId)">删除</button>
           <button type="button" class="secondary" @click="closeRoutineForm">取消</button>
-          <button :disabled="!storageReadable">保存</button>
+          <button :disabled="!canEditLocal">保存</button>
         </div>
       </form>
     </section>
@@ -400,7 +434,7 @@ function confirmImport() {
         <label for="task-title">快速记录</label>
         <small class="quick-hint">{{ quickType === 'default' ? '默认存入随笔；勾选后成为待办。' : '优先处理的事项会在本分类置顶。' }}</small>
       </div>
-      <input id="task-title" v-model="title" maxlength="150" placeholder="记录一下..." :disabled="!storageReadable">
+      <input id="task-title" v-model="title" maxlength="150" placeholder="记录一下..." :disabled="!canEditLocal">
       <div class="form-actions">
         <div class="quick-options">
           <label><input v-model="needProcessing" type="checkbox"> {{ quickType === 'default' ? '需要处理' : '优先处理' }}</label>
@@ -408,7 +442,7 @@ function confirmImport() {
         </div>
         <div class="quick-actions">
           <button type="button" class="text-button more-toggle" :aria-expanded="showMoreOptions" @click="toggleMoreOptions">{{ showMoreOptions ? '收起选项' : '更多选项' }}</button>
-          <button :disabled="!storageReadable">记录</button>
+          <button :disabled="!canEditLocal">记录</button>
         </div>
       </div>
       <div v-if="showMoreOptions" class="more-options">
@@ -417,7 +451,7 @@ function confirmImport() {
           <button v-if="quickType !== 'default'" type="button" @click="quickType = 'default'; onQuickTypeChange()">清除选择</button>
         </div>
         <label v-if="quickType === 'importantDate'" for="quick-target-date">目标日期</label>
-        <input v-if="quickType === 'importantDate'" id="quick-target-date" v-model="quickTargetDate" type="date" :disabled="!storageReadable">
+        <input v-if="quickType === 'importantDate'" id="quick-target-date" v-model="quickTargetDate" type="date" :disabled="!canEditLocal">
       </div>
     </form>
     <p v-if="message" role="alert" class="error">{{ message }}</p>
@@ -429,25 +463,25 @@ function confirmImport() {
           <div class="item-line"><button type="button" class="date-card-title" :aria-expanded="selectedDetailId === item.id" @click="selectedDetailId = selectedDetailId === item.id ? null : item.id">{{ item.title }}</button><span v-if="item.priority === true" class="urgent-mark item-status">优先处理</span></div>
           <span class="date-count">{{ countdownText(item.targetDate) }}</span>
           <time :datetime="item.targetDate">{{ item.targetDate }}</time>
-          <div v-if="selectedDetailId === item.id" class="item-detail detail-actions"><button type="button" class="text-button danger delete-button" :disabled="!storageReadable" @click="deleteItem(item.id)">删除</button></div>
+          <div v-if="selectedDetailId === item.id" class="item-detail detail-actions"><button type="button" class="text-button danger delete-button" :disabled="!canEditLocal" @click="deleteItem(item.id)">删除</button></div>
         </article>
       </div>
       <form v-if="showImportantForm" class="date-form" @submit.prevent="addImportantDate">
         <label for="important-title">名称</label>
-        <input id="important-title" v-model="importantTitle" maxlength="150" placeholder="例如：毕业纪念日" :disabled="!storageReadable">
+        <input id="important-title" v-model="importantTitle" maxlength="150" placeholder="例如：毕业纪念日" :disabled="!canEditLocal">
         <label for="important-date">目标日期</label>
-        <input id="important-date" v-model="importantTargetDate" type="date" :disabled="!storageReadable">
-        <div class="form-buttons"><button type="button" class="secondary" @click="closeImportantForm">取消</button><button :disabled="!storageReadable">保存</button></div>
+        <input id="important-date" v-model="importantTargetDate" type="date" :disabled="!canEditLocal">
+        <div class="form-buttons"><button type="button" class="secondary" @click="closeImportantForm">取消</button><button :disabled="!canEditLocal">保存</button></div>
       </form>
-      <div class="section-actions"><button type="button" class="mini-add date-add" :disabled="!storageReadable" :aria-label="showImportantForm ? '关闭重要日添加' : '添加重要日'" :aria-expanded="showImportantForm" @click="showImportantForm ? closeImportantForm() : showImportantForm = true">{{ showImportantForm ? '×' : '+' }}</button></div>
+      <div class="section-actions"><button type="button" class="mini-add date-add" :disabled="!canEditLocal" :aria-label="showImportantForm ? '关闭重要日添加' : '添加重要日'" :aria-expanded="showImportantForm" @click="showImportantForm ? closeImportantForm() : showImportantForm = true">{{ showImportantForm ? '×' : '+' }}</button></div>
     </section>
 
     <section class="panel project-section">
       <div class="category-heading">
         <button type="button" class="category-expand" :aria-expanded="showProjects" :aria-label="`${showProjects ? '收起' : '展开'}项目`" @click="showProjects = !showProjects"><span class="fold-mark" aria-hidden="true">{{ showProjects ? 'v' : '>' }}</span><span>项目</span><small>{{ projects.length }}</small></button>
-        <button type="button" class="mini-add" :disabled="!storageReadable" :aria-label="addingCategory === 'project' ? '关闭项目添加' : '添加项目'" @click="openCategoryForm('project')">{{ addingCategory === 'project' ? '×' : '+' }}</button>
+        <button type="button" class="mini-add" :disabled="!canEditLocal" :aria-label="addingCategory === 'project' ? '关闭项目添加' : '添加项目'" @click="openCategoryForm('project')">{{ addingCategory === 'project' ? '×' : '+' }}</button>
       </div>
-      <ProjectCreate v-if="addingCategory === 'project'" :can-edit="storageReadable" :available-tags="availableProjectTags" :save-project="createFullProject" @close="addingCategory = null" />
+      <ProjectCreate v-if="addingCategory === 'project'" :can-edit="canEditLocal" :available-tags="availableProjectTags" :save-project="createFullProject" @close="addingCategory = null" />
       <p v-if="showProjects && !projects.length" class="empty">还没有项目</p>
       <article v-for="(item, index) in visibleProjects" :key="item.id" class="category-row">
         <div class="item-line"><button type="button" class="category-title project-list-trigger" :aria-label="item.title ? undefined : '打开空名称项目详情'" :aria-expanded="selectedProjectId === item.id" @click="toggleProjectDetails(item.id)">{{ item.title }}<span v-for="tag in item.tags" :key="tag" class="project-user-tag">#{{ tag.replace(/^#+/, '') }}</span><span v-if="!showProjects && projects.length > 2 && index === 1" class="more-ellipsis" aria-hidden="true">……</span></button><span v-if="item.priority === true" class="urgent-mark item-status">优先处理</span></div>
@@ -458,14 +492,14 @@ function confirmImport() {
     <section class="panel">
       <div class="category-heading">
         <button type="button" class="category-expand" :aria-expanded="showOpenTodos" :aria-label="`${showOpenTodos ? '收起' : '展开'}一次性待办`" @click="showOpenTodos = !showOpenTodos"><span class="fold-mark" aria-hidden="true">{{ showOpenTodos ? 'v' : '>' }}</span><span>一次性待办</span><small>{{ openTodos.length }}</small></button>
-        <button type="button" class="mini-add" :disabled="!storageReadable" :aria-label="addingCategory === 'todo' ? '关闭一次性待办添加' : '添加一次性待办'" @click="openCategoryForm('todo')">{{ addingCategory === 'todo' ? '×' : '+' }}</button>
+        <button type="button" class="mini-add" :disabled="!canEditLocal" :aria-label="addingCategory === 'todo' ? '关闭一次性待办添加' : '添加一次性待办'" @click="openCategoryForm('todo')">{{ addingCategory === 'todo' ? '×' : '+' }}</button>
       </div>
       <form v-if="addingCategory === 'todo'" class="category-add-form" @submit.prevent="addCategoryItem">
-        <input id="todo-title" v-model="categoryTitle" aria-label="一次性待办内容" maxlength="150" :disabled="!storageReadable" placeholder="新待办">
-        <div class="form-buttons"><button type="button" class="secondary" @click="openCategoryForm('todo')">取消</button><button :disabled="!storageReadable">保存</button></div>
+        <input id="todo-title" v-model="categoryTitle" aria-label="一次性待办内容" maxlength="150" :disabled="!canEditLocal" placeholder="新待办">
+        <div class="form-buttons"><button type="button" class="secondary" @click="openCategoryForm('todo')">取消</button><button :disabled="!canEditLocal">保存</button></div>
       </form>
       <p v-if="showOpenTodos && !openTodos.length" class="empty">这里暂时没有待办。</p>
-      <OrdinaryItem v-for="(task, index) in visibleOpenTodos" :key="task.id" :item="task" :can-edit="storageReadable" :expanded="selectedTodoId === task.id" :ellipsis="!showOpenTodos && openTodos.length > 2 && index === 1" :save-item="saveOrdinaryItem" @expand="selectedTodoId = selectedTodoId === task.id ? null : task.id" @complete="toggleTask(task.id)" @delete="deleteItem(task.id)" />
+      <OrdinaryItem v-for="(task, index) in visibleOpenTodos" :key="task.id" :item="task" :can-edit="canEditLocal" :expanded="selectedTodoId === task.id" :ellipsis="!showOpenTodos && openTodos.length > 2 && index === 1" :save-item="saveOrdinaryItem" @editing="protectOrdinary" @expand="selectedTodoId = selectedTodoId === task.id ? null : task.id" @complete="toggleTask(task.id)" @delete="deleteItem(task.id)" />
     </section>
 
     <section v-for="category in categories" :key="category.type" class="panel category-section">
@@ -473,14 +507,14 @@ function confirmImport() {
         <button type="button" class="category-expand" :aria-expanded="expandedCategories[category.type]" :aria-label="`${expandedCategories[category.type] ? '收起' : '展开'}${category.label}`" @click="expandedCategories[category.type] = !expandedCategories[category.type]">
           <span class="fold-mark" aria-hidden="true">{{ expandedCategories[category.type] ? 'v' : '>' }}</span><span>{{ category.label }}</span><small>{{ categoryItems(category.type).length }}</small>
         </button>
-        <button type="button" class="mini-add" :disabled="!storageReadable" :aria-label="`${addingCategory === category.type ? '关闭' : '添加'}${category.label}`" @click="openCategoryForm(category.type)">{{ addingCategory === category.type ? '×' : '+' }}</button>
+        <button type="button" class="mini-add" :disabled="!canEditLocal" :aria-label="`${addingCategory === category.type ? '关闭' : '添加'}${category.label}`" @click="openCategoryForm(category.type)">{{ addingCategory === category.type ? '×' : '+' }}</button>
       </div>
       <form v-if="addingCategory === category.type" class="category-add-form" @submit.prevent="addCategoryItem">
-        <input :id="`add-${category.type}`" v-model="categoryTitle" :aria-label="`${category.label}内容`" maxlength="150" :disabled="!storageReadable" placeholder="写点什么...">
-        <div class="form-buttons"><button type="button" class="secondary" @click="openCategoryForm(category.type)">取消</button><button :disabled="!storageReadable">保存</button></div>
+        <input :id="`add-${category.type}`" v-model="categoryTitle" :aria-label="`${category.label}内容`" maxlength="150" :disabled="!canEditLocal" placeholder="写点什么...">
+        <div class="form-buttons"><button type="button" class="secondary" @click="openCategoryForm(category.type)">取消</button><button :disabled="!canEditLocal">保存</button></div>
       </form>
       <p v-if="!categoryItems(category.type).length" class="empty">{{ category.type === 'note' ? '随手记下的内容会出现在这里。' : `还没有${category.label}记录。` }}</p>
-      <OrdinaryItem v-for="(item, index) in visibleCategoryItems(category.type)" :key="item.id" :item="item" :can-edit="storageReadable" :expanded="item.type === 'note' ? selectedNoteId === item.id : selectedDetailId === item.id" :ellipsis="!expandedCategories[category.type] && categoryItems(category.type).length > 2 && index === 1" :save-item="saveOrdinaryItem" @expand="item.type === 'note' ? openNoteDetails(item) : selectedDetailId = selectedDetailId === item.id ? null : item.id" @complete="toggleTask(item.id)" @delete="deleteItem(item.id)">
+      <OrdinaryItem v-for="(item, index) in visibleCategoryItems(category.type)" :key="item.id" :item="item" :can-edit="canEditLocal" :expanded="item.type === 'note' ? selectedNoteId === item.id : selectedDetailId === item.id" :ellipsis="!expandedCategories[category.type] && categoryItems(category.type).length > 2 && index === 1" :save-item="saveOrdinaryItem" @editing="protectOrdinary" @expand="item.type === 'note' ? openNoteDetails(item) : selectedDetailId = selectedDetailId === item.id ? null : item.id" @complete="toggleTask(item.id)" @delete="deleteItem(item.id)">
         <form v-if="selectedNoteId === item.id && !item.convertedToId" class="conversion-form" @submit.prevent="saveNoteConversion">
           <label :for="`convert-${item.id}`">转成</label>
           <select :id="`convert-${item.id}`" v-model="conversionType">
@@ -489,8 +523,8 @@ function confirmImport() {
             <option value="waiting">等待中</option><option value="creation">娱乐/创作</option>
           </select>
           <label v-if="conversionType === 'importantDate'" :for="`convert-date-${item.id}`">目标日期</label>
-          <input v-if="conversionType === 'importantDate'" :id="`convert-date-${item.id}`" v-model="conversionDate" type="date" :disabled="!storageReadable">
-          <div class="form-buttons"><button type="button" class="secondary" @click="selectedNoteId = null">取消</button><button :disabled="!storageReadable">确认录入</button></div>
+          <input v-if="conversionType === 'importantDate'" :id="`convert-date-${item.id}`" v-model="conversionDate" type="date" :disabled="!canEditLocal">
+          <div class="form-buttons"><button type="button" class="secondary" @click="selectedNoteId = null">取消</button><button :disabled="!canEditLocal">确认录入</button></div>
         </form>
       </OrdinaryItem>
     </section>
@@ -500,7 +534,7 @@ function confirmImport() {
       <button type="button" class="category-expand" :aria-expanded="showCompleted" :aria-label="`${showCompleted ? '收起' : '展开'}已完成`" @click="showCompleted = !showCompleted"><span class="fold-mark" aria-hidden="true">{{ showCompleted ? 'v' : '>' }}</span><span>已完成</span><small>{{ completedCount }}</small></button>
       <div v-if="showCompleted">
         <p v-if="!completedCount" class="empty">还没有已完成的事项。</p>
-        <OrdinaryItem v-for="task in completedTodos" :key="task.id" :item="task" :can-edit="storageReadable" :expanded="selectedTodoId === task.id" :save-item="saveOrdinaryItem" @expand="selectedTodoId = selectedTodoId === task.id ? null : task.id" @complete="toggleTask(task.id)" @delete="deleteItem(task.id)" />
+        <OrdinaryItem v-for="task in completedTodos" :key="task.id" :item="task" :can-edit="canEditLocal" :expanded="selectedTodoId === task.id" :save-item="saveOrdinaryItem" @editing="protectOrdinary" @expand="selectedTodoId = selectedTodoId === task.id ? null : task.id" @complete="toggleTask(task.id)" @delete="deleteItem(task.id)" />
         <article v-for="item in completedProjects" :key="item.id" class="category-row completed-project">
           <div class="item-line"><button type="button" class="category-title project-list-trigger" :aria-label="item.title ? undefined : '打开已完成的空名称项目详情'" :aria-expanded="selectedProjectId === item.id" @click="toggleProjectDetails(item.id)">{{ item.title }}<span v-for="tag in item.tags" :key="tag" class="project-user-tag">#{{ tag.replace(/^#+/, '') }}</span></button><span v-if="item.priority === true" class="urgent-mark item-status">优先处理</span></div>
           <p class="project-next-step">{{ item.nextStep }}</p>
@@ -508,10 +542,10 @@ function confirmImport() {
       </div>
     </section>
     <footer>
-      <button class="secondary" :disabled="!storageReadable" @click="exportTasks">导出完整备份</button>
+      <button class="secondary" :disabled="!canEditLocal" @click="exportTasks">导出完整备份</button>
       <label class="backup-label" for="backup-file">导入备份（JSON 文件）</label>
-      <input id="backup-file" type="file" accept=".json,application/json" :disabled="!storageReadable" @change="chooseBackup">
-      <p>导入会替换当前全部记录，请先导出当前备份。备份仅在当前设备／浏览器处理，不涉及云同步。清除网站数据会删除本地记录。</p>
+      <input id="backup-file" type="file" accept=".json,application/json" :disabled="!canEditLocal" @change="chooseBackup">
+      <p>导出包含当前完整 v2 事项，请先保留备份。未纳入同步时，导入会替换本机全部记录；已有同步绑定时会阻止整份覆盖，避免把备份替换变成云端删除。清除网站数据会删除本机记录和未补传修改。</p>
       <div v-if="pendingImport" class="import-confirm" role="alert">
         <p>“{{ pendingFileName }}”校验通过：将用 {{ pendingImport.items.length }} 条记录替换当前 {{ workbenchData.items.length }} 条记录。确定导入吗？</p>
         <div class="import-actions">
@@ -528,11 +562,12 @@ function confirmImport() {
       </div>
     </footer>
     </template>
-    <ProjectDialog v-if="selectedProject && cloudState.source === 'local'" ref="projectDialog" :key="selectedProject.id" :project="selectedProject" :can-edit="storageReadable" :available-tags="availableProjectTags" :save-project="saveProject" :delete-project="deleteItem" @close="selectedProjectId = null" />
+    <ProjectDialog v-if="selectedProject && cloudState.source === 'local'" ref="projectDialog" :key="selectedProject.id" :project="selectedProject" :can-edit="canEditLocal" :available-tags="availableProjectTags" :save-project="saveProject" :delete-project="deleteItem" @close="selectedProjectId = null" />
     <!-- 默认收起的连接入口放在整页最后；本机首页继续使用原来的布局。 -->
     <details class="cloud-settings">
       <summary>云端连接</summary>
       <CloudConnection :state="cloudState" @source="cloud.selectSource" @login="cloud.login()" @enable-write="cloud.login({ write: true })" @resume="cloud.resumeConnection()" @logout="cloud.logout" @refresh="cloud.refresh()" />
+      <SyncSettings :snapshot="syncSnapshot" :status="syncStatus" :connection="cloudState" @enabled="sync.enabled" @enroll="sync.enroll" @resolve="sync.resolve" />
     </details>
   </main>
 </template>

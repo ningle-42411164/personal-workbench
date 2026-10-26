@@ -115,7 +115,7 @@ test('审查：重要日按本地日期计算当天、过期、跨年和闰日',
   assert.throws(() => daysUntil('2026-02-29'), /格式/);
 });
 
-test('审查复现（未修复）：两个页面写入旧快照时，后保存者会覆盖另一页的新记录', () => {
+test('旧存储原语复现：首页已改走事务入口，直接写 v2 旧快照仍可能覆盖', () => {
   const storage = memoryStorage();
   const pageA = readWorkbenchData(storage);
   const pageB = readWorkbenchData(storage);
@@ -123,7 +123,7 @@ test('审查复现（未修复）：两个页面写入旧快照时，后保存�
   const itemB = createNote('页面 B 新记录', at);
   writeWorkbenchData(dataOf([...pageA.items, itemA]), storage);
   writeWorkbenchData(dataOf([...pageB.items, itemB]), storage);
-  // 这是对当前缺陷的复现，不是认定这种覆盖行为正确；修复后应更新本测试的期望。
+  // 保留旧原语的边界证据；新版首页的跨窗口版本保护另由 syncWorkbench.test.js 验证。
   assert.deepEqual(readWorkbenchData(storage).items.map(item => item.id), [itemB.id]);
 });
 

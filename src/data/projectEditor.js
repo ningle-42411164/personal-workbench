@@ -3,6 +3,7 @@ import { normalizeUserTags } from './userTags.js';
 
 // 仅协调当前项目字段草稿；持久化仍交给 App.saveProject，不新增存储格式或云端请求。
 export function createProjectEditor({ state, getProject, saveProject, canEdit, confirmComplete = () => true }) {
+  let editingBase;
   function cancel() { if (!state.busy) { state.field = null; state.draft = ''; state.error = ''; } }
   async function persist(fields) {
     try {
@@ -20,6 +21,9 @@ export function createProjectEditor({ state, getProject, saveProject, canEdit, c
     if (!state.field) return true;
     state.busy = true;
     try {
+      if (JSON.stringify(projectEditableFields(getProject())[state.field]) !== editingBase) {
+        state.error = '此字段在编辑期间已由其他窗口或云端修改，输入保留。请核对新值后再编辑，不会自动覆盖。'; return false;
+      }
       if (!await persist({ [state.field]: state.draft })) return false;
       state.field = null; state.draft = ''; state.error = '';
       return true;
@@ -30,6 +34,7 @@ export function createProjectEditor({ state, getProject, saveProject, canEdit, c
     if (state.field === field) return true; // 同字段重入只聚焦，不能用正式旧值重置输入。
     if (!await commit()) return false;
     const value = projectEditableFields(getProject())[field];
+    editingBase = JSON.stringify(value);
     state.field = field;
     state.draft = field === 'tags' ? normalizeUserTags(value) : value ?? '';
     state.error = '';

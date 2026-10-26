@@ -32,7 +32,7 @@ export function createCloudAuth({ config = CLOUD_CONFIG, vault = createCredentia
     ensureCurrent(start);
     if (await vault.revision() !== revision) throw interrupted();
     access = { token: result.access_token, clientId: session.clientId, scope: session.scope, grantExpiresAt: session.grantExpiresAt, canWrite: scopes.includes('workbench:write'), expiresAt: now() + Math.min(Number(result.expires_in) || config.accessTokenSeconds, config.accessTokenSeconds) * 1000, revision };
-    publish('connected', `${access.canWrite ? '云端测试读写' : '只读'}连接已恢复；本机事项仍独立保存。`, true);
+    publish('connected', `${access.canWrite ? '云端测试读写' : '只读'}连接已恢复；已纳入事项按自动同步设置处理。`, true);
     return access.token;
   }
   function failed(error) {

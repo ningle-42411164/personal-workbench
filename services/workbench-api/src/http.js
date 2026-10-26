@@ -30,6 +30,17 @@ export async function readJson(request) {
 export async function handleApi(request, service, baseUrl) {
   try {
     const url = new URL(request.url);
+    const syncMatch = /^\/api\/sync\/items\/([^/]+)$/.exec(url.pathname);
+    if (syncMatch && request.method === 'GET') return json(await service.syncState({ id: syncMatch[1] }));
+    if (syncMatch && request.method === 'PUT') {
+      const body = await readJson(request);
+      if (!body || typeof body !== 'object' || Array.isArray(body) || Object.hasOwn(body, 'id')) throw new ApiError(400, 'INVALID_INPUT', '事项 ID 只能通过路径指定。');
+      return json(await service.sync({ ...body, id: syncMatch[1] }));
+    }
+    if (url.pathname === '/api/changes' && request.method === 'GET') {
+      const raw = Object.fromEntries(url.searchParams);
+      return json(await service.changes({ ...raw, ...(raw.limit !== undefined ? { limit: Number(raw.limit) } : {}) }));
+    }
     if (url.pathname === '/mcp') return await handleMcp(request, service, baseUrl);
     if (url.pathname === '/api/items' && request.method === 'GET') {
       const allowed = new Set(['type', 'includeCompleted', 'limit', 'offset']);
@@ -44,6 +55,17 @@ export async function handleApi(request, service, baseUrl) {
       }));
     }
     if (url.pathname === '/api/items' && request.method === 'POST') return json(await service.create(await readJson(request)), 201);
+    const itemMatch = /^\/api\/items\/([^/]+)(\/completion)?$/.exec(url.pathname);
+    if (itemMatch) {
+      const id = itemMatch[1];
+      if (!itemMatch[2] && request.method === 'GET') return json(await service.getItem({ id }));
+      if (request.method === 'PATCH' && !itemMatch[2] || request.method === 'DELETE' && !itemMatch[2] || request.method === 'POST' && itemMatch[2]) {
+        const body = await readJson(request);
+        if (!body || typeof body !== 'object' || Array.isArray(body) || Object.hasOwn(body, 'id')) throw new ApiError(400, 'INVALID_INPUT', '事项 ID 只能通过路径指定。');
+        const input = { ...body, id };
+        return json(await (itemMatch[2] ? service.completeItem(input) : request.method === 'DELETE' ? service.deleteItem(input) : service.patchItem(input)));
+      }
+    }
     const match = /^\/api\/projects\/([^/]+)$/.exec(url.pathname);
     if (match && request.method === 'GET') return json(await service.getProject({ id: match[1] }));
     if (match && request.method === 'PATCH') {
