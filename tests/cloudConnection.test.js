@@ -212,3 +212,16 @@ test('写入必须显式升级；拒绝不丢原只读会话，续期不能静�
   const again = createCloudAuth({ vault: s.vault, client: s.client, now: () => 101000 });
   await again.restore(); assert.equal(again.getStatus().canWrite, true);
 });
+
+test('保存后确认读取不会复用保存前尚未完成的旧 GET', async () => {
+  const oldRead = later(); let calls = 0;
+  const { controller } = controllerSetup({ async listItems() { calls++; return calls === 1 ? oldRead.promise : [{ item: { title: '虚构保存后最新结果' }, version: 3 }]; } });
+  controller.selectSource('cloud');
+  const confirming = controller.refreshAfterWrite();
+  assert.equal(calls, 1);
+  oldRead.resolve([{ item: { title: '虚构保存前旧结果' }, version: 2 }]);
+  await confirming;
+  assert.equal(calls, 2);
+  assert.equal(controller.getState().items[0].version, 3);
+  controller.stop();
+});

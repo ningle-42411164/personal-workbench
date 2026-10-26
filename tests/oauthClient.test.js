@@ -56,3 +56,19 @@ test('错误 issuer 或跨站 token endpoint 不会被用于发送授权结果',
     await assert.rejects(client.authorize('fake-client', 'fake-state', 'a'.repeat(64)));
   }
 });
+
+test('明确增加写权限时，公共客户端注册与 PKCE 授权使用同一范围', async () => {
+  let registered;
+  const client = createOAuthClient(CLOUD_CONFIG, async (url, init) => {
+    if (new URL(url).pathname === '/.well-known/oauth-authorization-server') return Response.json(metadata);
+    registered = JSON.parse(init.body);
+    return Response.json({ client_id: 'fake-write-client' }, { status: 201 });
+  });
+  const id = await client.register(undefined, CLOUD_CONFIG.writeScope);
+  const url = new URL(await client.authorize(id, 'fake-state', 'a'.repeat(64), undefined, CLOUD_CONFIG.writeScope));
+  assert.equal(registered.scope, CLOUD_CONFIG.writeScope);
+  assert.match(registered.client_name, /测试读写/);
+  assert.equal(url.searchParams.get('scope'), registered.scope);
+  assert.equal(registered.token_endpoint_auth_method, 'none');
+  assert.equal(Object.hasOwn(registered, 'client_secret'), false);
+});
