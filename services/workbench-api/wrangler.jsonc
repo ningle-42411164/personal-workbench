@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "personal-workbench-api-test",
+  "account_id": "81328ba470204d0a99ffc2afbfbfc87f",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": false },
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-30",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "vars": {
+    "PUBLIC_BASE_URL": "https://personal-workbench-api-test.personal-workbench-ningle-test.workers.dev",
+    "FRONTEND_ORIGIN": "https://ningle-42411164.github.io",
+    "OWNER_GITHUB_ID": "275953771"
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "personal-workbench-api-test-db",
+    "database_id": "883621db-7c51-4798-873b-c24c09da5434",
+    "migrations_dir": "migrations"
+  }],
+  "kv_namespaces": [{
+    "binding": "OAUTH_KV",
+    "id": "43619700248542d4872a79534dcadfa9"
+  }]
+}
