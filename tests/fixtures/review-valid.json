@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 2,
+  "items": [{
+    "id": "review-backup-project",
+    "type": "project",
+    "title": "备份恢复测试项目",
+    "tags": ["学习", "Vue"],
+    "priority": true,
+    "createdAt": "2026-09-26T08:00:00.000Z",
+    "updatedAt": "2026-09-26T08:01:00.000Z",
+    "currentSituation": "已推进",
+    "nextStep": "下一步",
+    "updates": [
+      { "id": "review-created", "content": "创建此项目", "createdAt": "2026-09-26T08:00:00.000Z" },
+      { "id": "review-updated", "content": "已推进", "createdAt": "2026-09-26T08:01:00.000Z" }
+    ]
+  }]
+}

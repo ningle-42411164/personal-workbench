@@ -5,10 +5,37 @@ import LaunchSplash from './components/LaunchSplash.vue';
 import ProjectDetail from './components/ProjectDetail.vue';
 import ProjectCreate from './components/ProjectCreate.vue';
 import OrdinaryItem from './components/OrdinaryItem.vue';
+import CloudConnection from './components/CloudConnection.vue';
+import CloudReadOnly from './components/CloudReadOnly.vue';
+import { useCloudWorkbench } from './cloud/useCloudWorkbench.js';
 import { availableUserTags } from './data/userTags.js';
+import { readSplashEnabled, writeSplashEnabled } from './data/splashPreference.js';
 import { COMPLETABLE_TYPES, comparePriorityThenNewest, convertNote, createImportantDate, createNote, createRoutine, createSimpleItem, createTodo, daysUntil, emptyWorkbenchData, isCalendarDate, readWorkbenchData, removeItem, renameItem, toggleTodo, validateWorkbenchData, writeWorkbenchData } from './data/workbenchData.js';
 
+// 云端状态单独维护；下面原有 workbenchData/saveTasks 始终只操作本机事项。
+const cloud = useCloudWorkbench();
+const cloudState = cloud.state;
+const splashEnabled = ref(readSplashEnabled());
+// 进入时先决定是否挂载动画；开关修改影响下一次进入，已挂载动画仍按原会话/关闭逻辑运行。
+//readSplashEnabled()读取浏览器本地存储的启动动画开关状态，返回 true 或 false
+const showSplash = splashEnabled.value;
+const splashPreferenceError = ref('');
+
+function toggleSplashPreference() {
+  try {
+    const nextEnabled = !splashEnabled.value;
+    // 写入成功才改变开关，刷新时读取同一个 key；失败时不显示“已保存”的假状态。
+    writeSplashEnabled(nextEnabled);
+    splashEnabled.value = nextEnabled;
+    splashPreferenceError.value = '';
+  } catch {
+    splashPreferenceError.value = '启动动画设置未保存，请检查浏览器是否允许本地存储。';
+  }
+}
+
+// 唯一的持久化数据入口：保存成功后替换 .value，Vue 会更新依赖它的列表，不需要手动改 DOM。
 const workbenchData = ref(emptyWorkbenchData());
+// computed 是“从已有数据算出结果”，不是第二份数据库；items 改变时，这个待办视图也会重新计算。
 const tasks = computed(() => workbenchData.value.items.filter(item => item.type === 'todo'));
 const title = ref('');//保存输入框当前的文字。
 const urgent = ref(false);//保存“急需处理”复选框是否勾选。
@@ -34,6 +61,7 @@ const categories = [
   { type: 'creation', label: '娱乐/创作' },
   { type: 'shopping', label: '购物' },
 ];
+// 草稿、选中的详情和折叠状态只服务当前页面，不写入备份；刷新回到默认浏览状态。
 const expandedCategories = ref({ note: false, waiting: false, creation: false, shopping: false });
 const addingCategory = ref(null);
 const categoryTitle = ref('');
@@ -49,6 +77,7 @@ const showOpenTodos = ref(true);
 const today = ref(new Date());
 const pendingImport = ref(null);
 const pendingFileName = ref('');
+// 插件把 SW 的安装/更新事件转换成 Vue 状态；这不是 LocalStorage 保存成功的通知。
 const { offlineReady, needRefresh, updateServiceWorker } = useRegisterSW();
 
 // 浏览器保存的数据需要先校验，读取失败时不能悄悄覆盖旧数据。
@@ -60,6 +89,7 @@ try {
   message.value = error.message;
 }
 
+// filter 先生成新数组，再 sort 排序，所以首页分组不会直接重排持久化的 items。
 const routines = computed(() => workbenchData.value.items.filter(item => item.type === 'routine'));
 const importantDates = computed(() => workbenchData.value.items.filter(item => item.type === 'importantDate').sort(comparePriorityThenNewest));
 const openTodos = computed(() => tasks.value.filter(task => !task.done).sort((a, b) => Number(Boolean(b.priority)) - Number(Boolean(a.priority)) || Number(b.urgent) - Number(a.urgent) || b.createdAt.localeCompare(a.createdAt)));
@@ -70,6 +100,7 @@ const completedCount = computed(() => completedTodos.value.length + completedPro
 const visibleProjects = computed(() => showProjects.value ? projects.value : projects.value.slice(0, 2));
 const visibleOpenTodos = computed(() => showOpenTodos.value ? openTodos.value : openTodos.value.slice(0, 2));
 const availableProjectTags = computed(() => availableUserTags(workbenchData.value.items));
+// 已完成只改变原记录的状态，不搬到另一份数据；这里筛走 done 的事项，已完成区再筛出它们。
 function categoryItems(type) {
   return workbenchData.value.items.filter(item => item.type === type && !item.done).sort((a, b) =>
     type === 'note' ? Number(Boolean(a.convertedToId)) - Number(Boolean(b.convertedToId)) || b.createdAt.localeCompare(a.createdAt)
@@ -77,6 +108,7 @@ function categoryItems(type) {
 }
 function visibleCategoryItems(type) {
   const items = categoryItems(type);
+  // slice 只是取预览，不删除后面的记录；数量显示仍使用完整分类数组。
   return expandedCategories.value[type] ? items : items.slice(0, 2);
 }
 
@@ -85,6 +117,7 @@ function refreshToday() {
   clearTimeout(midnightTimer);
   today.value = new Date();
   const now = today.value;
+  // 用下一次本地午夜安排更新，不能固定等 24 小时，否则夏令时切换可能错过当天边界。
   midnightTimer = setTimeout(refreshToday, new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime() - now.getTime() + 100);
 }
 onMounted(() => {
@@ -93,6 +126,7 @@ onMounted(() => {
   document.addEventListener('click', closeProjectFromOutside);
 });
 onBeforeUnmount(() => {
+  // 组件移除时同时清理定时器与 document 监听，避免旧页面逻辑继续运行。
   clearTimeout(midnightTimer);
   document.removeEventListener('visibilitychange', refreshToday);
   document.removeEventListener('click', closeProjectFromOutside);
@@ -116,7 +150,7 @@ function countdownText(targetDate) {
 }
 
 // 先确认保存成功，再更新页面，避免出现“看似保存但实际丢失”。
-//这个saveTasks起保存数据到浏览器上面的功能（顺带同步vue数据库）
+//这个saveTasks起保存数据到浏览器上面的功能（顺带同步 Vue 响应式状态；这里不是数据库）
 function saveTasks(nextTasks) {//nextTasks是这个函数接收的参数
   if (!storageReadable.value) return false;
   try {
@@ -135,6 +169,7 @@ function saveTasks(nextTasks) {//nextTasks是这个函数接收的参数
 //创建新任务task后，把新任务和旧任务（...tasks.value）一起丢给saveTasks保存到浏览器
 // 2.0 现在把各种类型的事项放在同一个 items 数组中。
 function addTask() {
+  // default 是路由模式而非事项类型；明确选择类型后，复选框只控制 priority，不把分类改成 todo。
   if (quickType.value !== 'project' && !title.value.trim()) { message.value = '请先填写记录内容。'; return; }//非空字符串在 JS 里算 true,trim()删掉了title.value两端的空格之后，再！判断是否ture
   if (quickType.value === 'importantDate' && !isCalendarDate(quickTargetDate.value)) {
     message.value = '请先选择有效的目标日期。'; return;
@@ -147,6 +182,7 @@ function addTask() {
     : quickType.value === 'importantDate'
       ? createImportantDate(title.value.trim(), quickTargetDate.value, now, needProcessing.value)
       : createSimpleItem(quickType.value, title.value.trim(), now, needProcessing.value);
+  // 先生成新数组交给保存入口，只有返回 true 才清空草稿，失败时输入还留在页面上。
   if (saveTasks([...workbenchData.value.items, item])) {
     title.value = '';
     needProcessing.value = false;
@@ -205,6 +241,7 @@ function saveNoteConversion() {
 
 //切换完成状态，id 是操作目标传进来的参数
 function toggleTask(id) {
+  // map 保留非目标记录，只按稳定 ID 更新目标；完成时间由 toggleTodo 与 done 一起计算。
   saveTasks(workbenchData.value.items.map(item => item.id === id && COMPLETABLE_TYPES.includes(item.type) ? toggleTodo(item) : item));
 }
 // { ...task }展开task属性；完成状态与完成时间一起改变。
@@ -215,6 +252,7 @@ function saveOrdinaryItem(nextItem) {
 
 // 项目详情只负责生成新记录；沿用页面的“先写入、后更新”保存顺序。
 function saveProject(nextProject) {
+  // find 确认原项目仍存在；详情组件提出新值，由父组件统一负责实际持久化。
   const previous = workbenchData.value.items.find(item => item.id === nextProject.id && item.type === 'project');
   if (!previous || !saveTasks(workbenchData.value.items.map(item => item.id === nextProject.id ? nextProject : item))) return false;
   if ((previous.status === 'done') !== (nextProject.status === 'done')) selectedProjectId.value = null;
@@ -253,6 +291,7 @@ function deleteItem(id) {
   const item = workbenchData.value.items.find(candidate => candidate.id === id);
   if (!item || !storageReadable.value) return false;
   const typeLabel = { todo: '一次性待办', note: '随笔', routine: '日常持续', importantDate: '重要日', project: '项目', waiting: '等待中', creation: '娱乐/创作', shopping: '购物' }[item.type];
+  // some 只检查有没有关联随笔，用来提前说明删除目标后“已录入”标记会解除。
   const linkedNote = workbenchData.value.items.some(candidate => candidate.type === 'note' && candidate.convertedToId === id);
   const linkNotice = linkedNote ? '\n关联随笔会恢复为“未录入”，不会被删除。' : '';
   if (!window.confirm(`确定删除${typeLabel}“${item.title}”（创建于 ${new Date(item.createdAt).toLocaleString()}）吗？${linkNotice}\n此操作不能撤销。`)) return false;
@@ -282,9 +321,11 @@ function closeImportantForm() {
 //导出任务备份
 function exportTasks() {
   if (!storageReadable.value) return;
+  // JSON 文本装进 Blob，再用临时 URL 交给下载链接；它不是上传到服务器的地址。
   const url = URL.createObjectURL(new Blob([JSON.stringify(workbenchData.value, null, 2)], { type: 'application/json' }));
   const link = document.createElement('a');
   link.href = url; link.download = 'workbench-backup-v2.json'; link.click();
+  // 触发下载后释放临时 URL，避免反复导出留下不必要的内存引用。
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
@@ -296,6 +337,7 @@ async function chooseBackup(event) {
   if (!file) return;
   if (!storageReadable.value) return;
   try {
+    // File.text 异步读取本地文件；JSON.parse 只还原数据，随后校验，尚未写入浏览器。
     const data = JSON.parse(await file.text());
     pendingImport.value = validateWorkbenchData(data);
     pendingFileName.value = file.name;
@@ -308,6 +350,7 @@ async function chooseBackup(event) {
 function confirmImport() {
   if (!storageReadable.value || !pendingImport.value) return;
   try {
+    // 用户确认也不等于成功：必须写入成功，才替换响应式数据并显示成功提示。
     writeWorkbenchData(pendingImport.value);
     workbenchData.value = pendingImport.value;
     pendingImport.value = null;
@@ -319,13 +362,17 @@ function confirmImport() {
 </script>
 
 <template>
-  <LaunchSplash />
+  <LaunchSplash v-if="showSplash" />
   <main>
     <div class="page-status">
-      <span v-if="offlineReady" role="status">页面已缓存，可以断网使用。</span>
-      <span>记录保存在当前设备。</span>
+      <span v-if="offlineReady" role="status">页面资源已缓存。</span>
+      <span>{{ cloudState.source === 'local' ? '记录保存在当前设备。' : '正在查看独立云端测试数据，本机事项不变。' }}</span>
     </div>
     <header><span class="eyebrow">Personal Workbench</span><h1>欢迎回来，从哪里开始干活？</h1></header>
+    <CloudConnection :state="cloudState" @source="cloud.selectSource" @login="cloud.login" @logout="cloud.logout" @refresh="cloud.refresh()" />
+    <CloudReadOnly v-if="cloudState.source === 'cloud'" :state="cloudState" />
+    <!-- 本机视图保留原读写和导入导出；云端结果没有调用这些保存入口。 -->
+    <template v-else>
     <section class="routine-strip" aria-label="日常持续">
       <div class="routine-strip-head">
         <div class="routine-chips">
@@ -344,6 +391,7 @@ function confirmImport() {
         </div>
       </form>
     </section>
+    <!-- v-model 维护输入草稿；submit.prevent 阻止浏览器刷新页面，保存流程由 addTask 接管。 -->
     <form class="panel quick-form" @submit.prevent="addTask">
       <div class="quick-heading">
         <label for="task-title">快速记录</label>
@@ -446,6 +494,7 @@ function confirmImport() {
       </OrdinaryItem>
     </section>
 
+    <!-- 父组件用稳定 id 作为 key，子组件发出事件后由父组件更新记录，不把数组序号当事项身份。 -->
     <section class="panel completed-section">
       <button type="button" class="category-expand" :aria-expanded="showCompleted" :aria-label="`${showCompleted ? '收起' : '展开'}已完成`" @click="showCompleted = !showCompleted"><span class="fold-mark" aria-hidden="true">{{ showCompleted ? 'v' : '>' }}</span><span>已完成</span><small>{{ completedCount }}</small></button>
       <div v-if="showCompleted">
@@ -470,6 +519,14 @@ function confirmImport() {
           <button class="secondary" @click="pendingImport = null">取消</button>
         </div>
       </div>
+      <div class="splash-preference">
+        <div class="splash-preference-row">
+          <span>启动动画 <small>下次进入生效，每会话播放一次</small></span>
+          <button type="button" role="switch" aria-label="启动动画" :aria-checked="splashEnabled" class="secondary splash-toggle" @click="toggleSplashPreference">{{ splashEnabled ? '开启' : '关闭' }}</button>
+        </div>
+        <p v-if="splashPreferenceError" class="error" role="alert">{{ splashPreferenceError }}</p>
+      </div>
     </footer>
+    </template>
   </main>
 </template>

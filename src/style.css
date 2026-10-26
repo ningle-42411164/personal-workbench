@@ -59,6 +59,7 @@ input:focus, select:focus { border-color: #244d43; }
 .date-card-title { padding: 0; background: transparent; color: inherit; font-weight: 700; text-align: left; overflow-wrap: anywhere; }
 .date-count { color: #244d43; font-size: 22px; font-weight: 700; }
 .date-card time, .category-row time { color: #65766e; font-size: 12px; }
+/* 中间列允许缩到 0，再让长名称换行；否则 Grid 默认最小宽度可能把窄屏撑出横向滚动。 */
 .todo-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid #edf0eb; }
 .todo-check { display: grid; place-items: center; width: 44px; height: 44px; cursor: pointer; }
 .todo-row input { margin: 0; }
@@ -119,11 +120,28 @@ button.category-title:hover { text-decoration: underline; text-underline-offset:
 .notice { background: #dfede2; border-radius: 10px; padding: 14px; }
 .error { color: #a52d2d; }
 footer { margin-top: 28px; font-size: 13px; line-height: 1.7; }
+.splash-preference { margin-top: 20px; padding-top: 12px; border-top: 1px solid #dfe5df; color: #65766e; }
+.splash-preference-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.splash-preference-row > span { flex: 1 1 180px; min-width: 0; }
+.splash-preference-row small { display: inline-block; margin: 0 0 0 4px; font-size: 11px; }
+.splash-toggle { min-height: 36px; padding: 6px 12px; font-size: 12px; flex: 0 0 auto; }
 .secondary { background: #e4e9e3; color: #244d43; }
+.cloud-connection { margin-top: 20px; }
+.cloud-connection-head, .cloud-list-heading, .cloud-record-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.source-buttons, .cloud-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.source-buttons button, .cloud-actions button { min-height: 44px; }
+.cloud-connection p, .cloud-record p { line-height: 1.7; overflow-wrap: anywhere; }
+.connection-label, .cloud-note, .cloud-list-heading > span, .cloud-record-heading > span { color: #65766e; font-size: 13px; }
+.cloud-message, .cloud-stale { padding: 10px 12px; border-radius: 8px; background: #fff3d9; color: #75551d; }
+.cloud-record { padding: 16px 0; border-top: 1px solid #dfe5df; }
+.cloud-record h3 { margin: 0; font-size: 17px; }
+.cloud-record time { display: block; font-size: 12px; color: #65766e; }
+.cloud-readonly details { font-size: 14px; line-height: 1.8; }
 .backup-label { display: block; margin-top: 18px; font-size: 14px; font-weight: 600; }
 .import-confirm { margin-top: 16px; padding: 16px; border: 1px solid #a8b9af; border-radius: 10px; background: #fff; }
 .import-confirm p { margin-top: 0; color: #243d36; }
 .import-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+/* 小屏只调整布局：状态标签、日期和字段编辑器换行，完成/保存事件仍使用同一套 Vue 逻辑。 */
 @media (max-width: 480px) {
   main { padding: 28px 14px 48px; }
   .panel { padding: 16px; }

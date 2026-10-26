@@ -11,6 +11,7 @@
     <title>Personal Workbench</title>
     <link rel="icon" href="/favicon-64.png" type="image/png" sizes="64x64">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
+    <!-- Vue 脚本运行前先用静态启动层遮住页面，避免首帧出现工作台；组件接管后移除它。 -->
     <style>
       html, body { background: #f5f4ef; }
       #boot-splash { display: none; }
@@ -23,7 +24,16 @@
         background: #f5f4ef url('/launch-splash.png') center / cover no-repeat;
       }
     </style>
+    <!-- 在挂载前检查会话标记，同会话刷新时取消隐藏；这个标记不含事项数据。 -->
     <script>
+      // 静态启动层早于 Vue 出现，需提前读取同一偏好；关闭时不显示启动层，也不隐藏工作台。
+      try {
+        if (localStorage.getItem('personal-workbench.splash.enabled.v1') === 'false') {
+          document.documentElement.classList.remove('splash-pending');
+        }
+      } catch {
+        // 配置读取异常按默认开启处理，继续执行原有会话判断。
+      }
       try {
         if (sessionStorage.getItem('personal-workbench.splash.seen.v1')) {
           document.documentElement.classList.remove('splash-pending');
