@@ -1,4 +1,4 @@
-export const NODE_ONE_VERSION = '2026.10.26.1';
+export const NODE_ONE_VERSION = '2026.10.26.2';
 export const PHONE_ENROLLMENT_VERSION = 1;
 const productionOrigin = 'https://ningle-42411164.github.io';
 

@@ -6,7 +6,7 @@ import { equal, syncSupported } from './syncStore.js';
 const fail = (kind, message, code = '') => Object.assign(new CloudError(kind, message), { code });
 function record(value, id) {
   if (!Number.isSafeInteger(value?.version) || value.version < 1 || (value.deleted ? value.id : value.item?.id) !== id) throw fail('network', '未能核对服务端回执，将保留原请求重试。');
-  // 本批只合并待办与项目；其他分类的变更不进入本机集合。
+  // 仅校验当前同步范围；升级范围会重置一次游标，避免漏掉旧客户端跳过的记录。
   if (!value.deleted && syncSupported(value.item)) validateWorkbenchData({ schemaVersion: 2, items: [value.item] });
   return value;
 }

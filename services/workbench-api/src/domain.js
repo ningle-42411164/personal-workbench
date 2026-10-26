@@ -29,6 +29,7 @@ const versioned = { requestId, id: z.string().uuid(), expectedVersion: z.number(
 const timestamp = z.string().datetime();
 const snapshotBase = { id: z.string().uuid(), title, tags, createdAt: timestamp, updatedAt: timestamp, priority: z.boolean().optional() };
 export const syncSchema = z.object({ requestId, id: z.string().uuid(), expectedVersion: z.number().int().min(0), item: z.discriminatedUnion('type', [
+  ...['note', 'waiting', 'shopping', 'creation'].map(type => z.object({ ...snapshotBase, type: z.literal(type), done: z.boolean().optional(), completedAt: timestamp.nullable().optional() }).strict()),
   z.object({ ...snapshotBase, type: z.literal('todo'), urgent: z.boolean(), done: z.boolean(), completedAt: timestamp.nullable() }).strict(),
   z.object({ ...snapshotBase, type: z.literal('project'), status: z.enum(['active', 'paused', 'done']).nullable().optional(), startDate: date.nullable().optional(), dueDate: date.nullable().optional(), currentSituation: z.string().max(10000).optional(), nextStep: z.string().max(10000).optional(), completedAt: timestamp.nullable().optional(), updates: z.array(z.object({ id: z.string().min(1), content: z.string().max(10000), createdAt: timestamp }).strict()).optional() }).strict(),
 ]) }).strict();

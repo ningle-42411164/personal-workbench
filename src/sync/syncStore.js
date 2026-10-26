@@ -2,7 +2,8 @@ import { STORAGE_KEY, emptyWorkbenchData, validateWorkbenchData, removeItem } fr
 import { isKnownTestRecord } from './knownTestRecords.js';
 import { PHONE_ENROLLMENT_VERSION } from './ownerPhone.js';
 
-export const syncSupported = item => ['todo', 'project'].includes(item.type);
+import { SYNC_SCOPE_VERSION, syncSupported } from './syncPolicy.js';
+export { syncSupported } from './syncPolicy.js';
 export const copy = value => JSON.parse(JSON.stringify(value));
 const ordered = value => Array.isArray(value) ? value.map(ordered) : value && typeof value === 'object'
   ? Object.fromEntries(Object.keys(value).sort().map(key => [key, ordered(value[key])])) : value;
@@ -64,6 +65,9 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
           }
           if (legacy() !== next.legacyRaw) throw new Error('检测到旧版窗口另存了本机数据。已暂停写入；请导出两边备份后核对，避免覆盖。');
           isolateKnownTests(next);
+          if ((next.syncScopeVersion ?? 1) < SYNC_SCOPE_VERSION) {
+            next.cursor = '0'; next.syncScopeVersion = SYNC_SCOPE_VERSION;
+          }
           const previous = copy(next.data);
           // 回调必须同步；网络和授权刷新不得放进这个事务。
           result = change(next);
@@ -142,6 +146,8 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
         if (!state.enabled) return null;
         for (const id of Object.keys(state.dirty)) {
           if (isKnownTestRecord(id)) continue;
+          // 转换关联在下一批原子同步前暂缓，原随笔和目标均留在本机，不能只发送一半。
+          if (state.data.items.some(item => item.convertedToId && (item.id === id || item.convertedToId === id))) continue;
           if (state.blocked[id]) continue;
           if (state.outbox[id]) return state.outbox[id];
           const item = currentItem(state, id), binding = state.bindings[id];

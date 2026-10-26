@@ -4,7 +4,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { createSyncStore } from '../src/sync/syncStore.js';
 import { createSyncEngine } from '../src/sync/syncEngine.js';
 import { createSyncApi } from '../src/sync/syncApi.js';
-import { createTodo, createProject, createNote, renameItem, toggleTodo, updateProject, STORAGE_KEY } from '../src/data/workbenchData.js';
+import { createTodo, createProject, createNote, createRoutine, renameItem, toggleTodo, updateProject, STORAGE_KEY } from '../src/data/workbenchData.js';
 import { WorkbenchService, READ_SCOPE, WRITE_SCOPE } from '../services/workbench-api/src/service.js';
 import { D1Store } from '../services/workbench-api/src/store.js';
 import { sqliteD1 } from '../services/workbench-api/test/sqlite-d1.js';
@@ -62,7 +62,7 @@ test('首次初始化保留原 v2 与正式事项；只在开启后自动纳入�
   const original = s.storage.getItem(STORAGE_KEY);
   let state = await s.store.read(); assert.deepEqual(state.data.items, [formal]); assert.deepEqual(state.bindings, {});
   await s.store.setEnabled(true);
-  const note = createNote('本批不纳入的分类', at); await add(s.store, note);
+  const note = createRoutine('本批不纳入的分类', at); await add(s.store, note);
   const todo = createTodo('开启后新建', true, at); await add(s.store, todo);
   await s.engine.run();
   assert.deepEqual((await s.service.list({ includeCompleted: true })).items.map(r => r.item.id), [todo.id]);

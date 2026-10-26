@@ -12,9 +12,9 @@ const heldCopies = computed(() => props.snapshot?.data.items.filter(item => prop
 
 <template>
   <section class="panel sync-settings" aria-label="自动同步设置">
-    <h2>自动同步 <small>节点一 · {{ NODE_ONE_VERSION }}</small></h2>
-    <p>待办与项目在原首页编辑，先保存到本机；联网时自动上传并拉回 GPT 的修改。其他分类继续本机使用，日常无需上传按钮。</p>
-    <p v-if="ownerPhone && !snapshot?.nodeOne">此手机更新后会自动纳入现有待办与项目，复用有效读写连接，无需逐项勾选。</p>
+    <h2>自动同步 <small>{{ NODE_ONE_VERSION }}</small></h2>
+    <p>待办、项目、随笔、等待中、购物及娱乐创作在原首页保存并自动同步。日常持续、重要日和随笔转换关联暂留本机，日常无需上传按钮。</p>
+    <p v-if="ownerPhone && !snapshot?.nodeOne">此手机更新后会自动纳入支持的分类，复用有效读写连接，无需逐项勾选。</p>
     <p v-else-if="ownerPhone">已从此手机自动纳入 {{ snapshot?.nodeOne?.enrolledIds.length || 0 }} 项，已有绑定继续复用。</p>
     <p v-else>此设备不执行首次纳入，本机未绑定记录不会自动上传；首次来源只取正式页面上的手机数据。</p>
     <p role="status">{{ status.message }}<template v-if="snapshot"> · 待同步 {{ pending }} 项 · 待核对 {{ conflicts.length }} 项</template></p>

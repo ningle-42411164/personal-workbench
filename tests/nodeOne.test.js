@@ -62,16 +62,16 @@ test('首次连接恢复失败不丢本机；已有读写连接后台恢复后�
 });
 
 test('手机首次更新：有效读写权限才自动纳入待办/项目；已知测试 ID 排除，同名正式事项仍保留', async t => {
-  const todo = createTodo('古古怪怪', true, at), project = createProject('正式项目夹具', { currentSituation: '已有内容' }, at), note = createNote('随笔仍只在本机', at);
+  const todo = createTodo('古古怪怪', true, at), project = createProject('正式项目夹具', { currentSituation: '已有内容' }, at), note = createNote('随笔现已同步', at);
   const fake = { ...createTodo('古古怪怪', false, at), id: KNOWN_TEST_IDS[1] };
   const s = fixture(t, [todo, project, note, fake]); const oldRaw = s.storage.getItem(STORAGE_KEY);
   let state = await s.store.activateOwnerPhone(false);
   assert.equal(state.enabled, false); assert.equal(state.nodeOne, undefined); assert.deepEqual(state.bindings, {});
   await s.engine.run(); state = await s.store.read();
   assert.equal(state.enabled, true); assert.equal(state.nodeOne.source, 'owner-phone');
-  assert.deepEqual(state.nodeOne.enrolledIds, [todo.id, project.id]);
-  assert.equal(state.bindings[note.id], undefined); assert.equal(state.bindings[fake.id], undefined);
-  const cloud = await s.service.list({ includeCompleted: true }); assert.equal(cloud.items.length, 2);
+  assert.deepEqual(state.nodeOne.enrolledIds, [todo.id, project.id, note.id]);
+  assert.equal(state.bindings[note.id].version, 1); assert.equal(state.bindings[fake.id], undefined);
+  const cloud = await s.service.list({ includeCompleted: true }); assert.equal(cloud.items.length, 3);
   assert.equal(cloud.items.find(r => r.item.id === todo.id).item.title, '古古怪怪');
   assert.equal((await s.service.getItem({ id: todo.id })).item.createdAt, at);
   assert.equal(state.data.items.length, 4); assert.equal(s.storage.getItem(STORAGE_KEY), oldRaw);
@@ -148,13 +148,13 @@ test('旧测试绑定与结果不明请求移至隔离元数据，原 v2 文本�
   assert.equal(await s.store.prepare(), null);
 });
 
-test('用户暂停后刷新不重新开启；其他分类保存不上传；手机后续新增待办自动排队', async t => {
+test('用户暂停后刷新不重新开启；新增支持分类自动上传；手机后续新增待办自动排队', async t => {
   const s = fixture(t, [createNote('本机随笔', at)]); await s.store.activateOwnerPhone(true); await s.store.setEnabled(false);
   let state = await s.store.activateOwnerPhone(true); assert.equal(state.enabled, false);
   const todo = createTodo('暂停期间手机新增', false, at); await s.store.save(data([...state.data.items, todo]), state.revision);
   assert.equal((await s.store.read()).bindings[todo.id], undefined);
   await s.store.setEnabled(true); await s.engine.run(); state = await s.store.read();
-  assert.equal(state.bindings[todo.id].version, 1); assert.equal((await s.service.list({ includeCompleted: true })).items.length, 1);
+  assert.equal(state.bindings[todo.id].version, 1); assert.equal((await s.service.list({ includeCompleted: true })).items.length, 2);
   const added = createTodo('后续手机新增', true, at); await s.store.save(data([...state.data.items, added]), state.revision);
   await s.engine.run(); assert.equal((await s.service.getItem({ id: added.id })).item.urgent, true);
 });
