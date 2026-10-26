@@ -1,4 +1,7 @@
 import { ApiError } from './errors.js';
+import { KNOWN_TEST_IDS } from '../../../src/sync/knownTestRecords.js';
+
+const personalOnly = `item_id NOT IN (${KNOWN_TEST_IDS.map(() => '?').join(', ')})`;
 
 function unpack(row) {
   return row ? { item: JSON.parse(row.item_json), version: row.version } : null;
@@ -24,14 +27,15 @@ export class D1Store {
     const high = until === undefined ? maximum.seq : Number(until);
     if (high > maximum.seq || Number(since) > high) throw new ApiError(400, 'INVALID_CURSOR', '同步游标无效，未修改本机内容。');
     const { results } = await this.db.prepare(`SELECT seq, item_id, version, deleted, record_json FROM item_changes
-      WHERE owner_id = ? AND seq > ? AND seq <= ? ORDER BY seq LIMIT ?`).bind(this.ownerId, Number(since), high, limit + 1).all();
+      WHERE owner_id = ? AND seq > ? AND seq <= ? AND ${personalOnly} ORDER BY seq LIMIT ?`).bind(this.ownerId, Number(since), high, ...KNOWN_TEST_IDS, limit + 1).all();
     const selected = results.slice(0, limit);
     const hasMore = results.length > limit;
     return { changes: selected.map(row => ({ seq: String(row.seq), id: row.item_id, version: row.version, deleted: Boolean(row.deleted), record: row.record_json ? JSON.parse(row.record_json) : null })), cursor: String(hasMore ? selected.at(-1).seq : high), until: String(high), hasMore };
   }
   async list({ type, includeCompleted, limit, offset }) {
-    const clauses = ['owner_id = ?'];
-    const values = [this.ownerId];
+    // 网页与 MCP 共用正式列表；只排除有明确联调证据的 ID，不按标题删除或判断身份。
+    const clauses = ['owner_id = ?', personalOnly];
+    const values = [this.ownerId, ...KNOWN_TEST_IDS];
     if (type) { clauses.push("json_extract(item_json, '$.type') = ?"); values.push(type); }
     if (!includeCompleted) clauses.push("COALESCE(json_extract(item_json, '$.done'), 0) = 0 AND COALESCE(json_extract(item_json, '$.status'), '') <> 'done'");
     const { results } = await this.db.prepare(`SELECT item_json, version FROM workbench_items WHERE ${clauses.join(' AND ')}

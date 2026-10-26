@@ -67,7 +67,7 @@ test('明确增加写权限时，公共客户端注册与 PKCE 授权使用同�
   const id = await client.register(undefined, CLOUD_CONFIG.writeScope);
   const url = new URL(await client.authorize(id, 'fake-state', 'a'.repeat(64), undefined, CLOUD_CONFIG.writeScope));
   assert.equal(registered.scope, CLOUD_CONFIG.writeScope);
-  assert.match(registered.client_name, /测试读写/);
+  assert.equal(registered.client_name, '个人工作台网页（读写）');
   assert.equal(url.searchParams.get('scope'), registered.scope);
   assert.equal(registered.token_endpoint_auth_method, 'none');
   assert.equal(Object.hasOwn(registered, 'client_secret'), false);

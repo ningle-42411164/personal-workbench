@@ -32,7 +32,7 @@ export function createCloudAuth({ config = CLOUD_CONFIG, vault = createCredentia
     ensureCurrent(start);
     if (await vault.revision() !== revision) throw interrupted();
     access = { token: result.access_token, clientId: session.clientId, scope: session.scope, grantExpiresAt: session.grantExpiresAt, canWrite: scopes.includes('workbench:write'), expiresAt: now() + Math.min(Number(result.expires_in) || config.accessTokenSeconds, config.accessTokenSeconds) * 1000, revision };
-    publish('connected', `${access.canWrite ? '云端测试读写' : '只读'}连接已恢复；已纳入事项按自动同步设置处理。`, true);
+    publish('connected', `${access.canWrite ? '读写' : '只读'}连接已恢复；待办与项目按同步设置自动处理。`, true);
     return access.token;
   }
   function failed(error) {
@@ -54,7 +54,7 @@ export function createCloudAuth({ config = CLOUD_CONFIG, vault = createCredentia
       const revision = await vault.revision();
       const saved = await vault.get('session');
       ensureCurrent(start);
-      if (!saved) { publish('disconnected', '本机功能无需登录；连接后可读取云端测试数据。', false); return null; }
+      if (!saved) { publish('disconnected', '本机功能无需登录；连接后自动同步待办与项目。', false); return null; }
       if (saved.grantExpiresAt <= now()) {
         await vault.clearSession(); access = undefined;
         publish('expired', '保存的连接已到期，请重新授权。', false); return null;

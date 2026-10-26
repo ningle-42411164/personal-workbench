@@ -1,4 +1,6 @@
 import { STORAGE_KEY, emptyWorkbenchData, validateWorkbenchData, removeItem } from '../data/workbenchData.js';
+import { isKnownTestRecord } from './knownTestRecords.js';
+import { PHONE_ENROLLMENT_VERSION } from './ownerPhone.js';
 
 export const syncSupported = item => ['todo', 'project'].includes(item.type);
 export const copy = value => JSON.parse(JSON.stringify(value));
@@ -11,14 +13,27 @@ function putItem(state, item, id) {
     : state.data.items.some(value => value.id === id) ? removeItem(state.data.items, id) : state.data.items;
 }
 function dirty(state, id) {
-  if (!state.bindings[id]) return;
+  if (isKnownTestRecord(id) || !state.bindings[id]) return;
   if (state.outbox[id] || !equal(currentItem(state, id), state.bindings[id].base)) state.dirty[id] = true;
   else delete state.dirty[id];
 }
 
+function isolateKnownTests(state) {
+  state.testRecords ??= {};
+  for (const id of new Set([...state.data.items.map(item => item.id), ...Object.keys(state.bindings), ...Object.keys(state.outbox), ...Object.keys(state.blocked), ...Object.keys(state.dirty)])) {
+    if (!isKnownTestRecord(id)) continue;
+    // 不移除 v2 原文，避免破坏本机随笔等分类的转换关联；正式视图和同步分别按 ID 排除。
+    if (state.bindings[id] || state.outbox[id] || state.blocked[id] || state.dirty[id]) {
+      state.testRecords[id] = { binding: state.bindings[id] ?? null, outbox: state.outbox[id] ?? null,
+        blocked: state.blocked[id] ?? null, dirty: Boolean(state.dirty[id]) };
+    }
+    delete state.bindings[id]; delete state.outbox[id]; delete state.blocked[id]; delete state.dirty[id];
+  }
+}
+
 // 事项、版本、待发送请求和拉取游标在同一个 IndexedDB 事务中提交。
 // 旧 LocalStorage v2 原文只保留为迁移前备份；导出仍使用原 v2 格式。
-export function createSyncStore({ indexedDB, storage, name = 'personal-workbench.local-sync.v1', uuid = () => crypto.randomUUID() } = {}) {
+export function createSyncStore({ indexedDB, storage, name = 'personal-workbench.local-sync.v1', uuid = () => crypto.randomUUID(), ownerPhone = false, now = () => new Date().toISOString() } = {}) {
   let opening;
   const listeners = new Set();
   const legacy = () => (storage ?? globalThis.localStorage).getItem(STORAGE_KEY);
@@ -48,6 +63,7 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
               enabled: false, bindings: {}, dirty: {}, outbox: {}, blocked: {}, archive: [], cursor: '0', legacyRaw: raw };
           }
           if (legacy() !== next.legacyRaw) throw new Error('检测到旧版窗口另存了本机数据。已暂停写入；请导出两边备份后核对，避免覆盖。');
+          isolateKnownTests(next);
           const previous = copy(next.data);
           // 回调必须同步；网络和授权刷新不得放进这个事务。
           result = change(next);
@@ -70,6 +86,7 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
   }
   return {
     read,
+    ownerPhone,
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     async save(data, revision, { importing = false } = {}) {
       validateWorkbenchData(data);
@@ -79,8 +96,8 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
         const oldIds = new Set(state.data.items.map(item => item.id));
         const previous = state.data;
         state.data = copy(data);
-        if (state.enabled && !importing) for (const item of data.items) {
-          if (!oldIds.has(item.id) && syncSupported(item) && !state.bindings[item.id]) state.bindings[item.id] = { version: 0, base: null };
+        if (ownerPhone && state.enabled && !importing) for (const item of data.items) {
+          if (!oldIds.has(item.id) && syncSupported(item) && !isKnownTestRecord(item.id) && !state.heldLocal?.[item.id] && !state.bindings[item.id]) state.bindings[item.id] = { version: 0, base: null };
         }
         for (const id of Object.keys(state.bindings)) {
           if (state.blocked[id]?.kind === 'rejected' && state.blocked[id].code !== 'REQUEST_ID_REUSED'
@@ -91,13 +108,31 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
         }
       })).state;
     },
+    async activateOwnerPhone(canWrite) {
+      return (await transact(state => {
+        if (!ownerPhone || !canWrite) return;
+        if (!state.nodeOne) {
+          // 所有者已授权手机更新后自动纳入；首次标记与绑定在同一事务中写入。
+          // 电脑和隔离页面不会进入此分支；已有绑定、请求与版本原样复用。
+          state.nodeOne = { version: PHONE_ENROLLMENT_VERSION, deviceId: uuid(), source: 'owner-phone', startedAt: now(), enrolledIds: [] };
+          state.enabled = true;
+        }
+        if (!state.enabled) return; // 首次完成后用户明确暂停，不因刷新/续期再次开启。
+        for (const item of state.data.items) {
+          if (!syncSupported(item) || isKnownTestRecord(item.id) || state.heldLocal?.[item.id] || state.bindings[item.id]) continue;
+          state.bindings[item.id] = { version: 0, base: null };
+          state.nodeOne.enrolledIds.push(item.id);
+          dirty(state, item.id);
+        }
+      })).state;
+    },
     async setEnabled(enabled) { return (await transact(state => { state.enabled = Boolean(enabled); })).state; },
     async enroll(ids, revision) {
       return (await transact(state => {
         expected(state, revision);
         for (const id of ids) {
           const item = currentItem(state, id);
-          if (!item || !syncSupported(item) || state.bindings[id]) throw new Error('纳入预览已变化，请重新核对。');
+          if (!item || !syncSupported(item) || isKnownTestRecord(id) || state.bindings[id]) throw new Error('纳入预览已变化，请重新核对。');
           state.bindings[id] = { version: 0, base: null }; dirty(state, id);
         }
       })).state;
@@ -106,6 +141,7 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
       return (await transact(state => {
         if (!state.enabled) return null;
         for (const id of Object.keys(state.dirty)) {
+          if (isKnownTestRecord(id)) continue;
           if (state.blocked[id]) continue;
           if (state.outbox[id]) return state.outbox[id];
           const item = currentItem(state, id), binding = state.bindings[id];
@@ -140,6 +176,7 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
         if (!allowed() || !state.enabled || state.cursor !== from) return false;
         for (const change of page.changes) {
           const id = change.id, binding = state.bindings[id];
+          if (isKnownTestRecord(id)) continue;
           if (!binding && (!change.record || !syncSupported(change.record.item))) continue;
           if (binding && change.version <= binding.version) continue;
           if (state.dirty[id] || state.outbox[id]) continue; // 本机未确认的修改不能被拉取覆盖；重放后再决定冲突。
@@ -161,8 +198,12 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
         if (!conflict?.remote) throw new Error('尚未取得云端版本，请恢复连接后重新核对。');
         const local = currentItem(state, id);
         state.archive.push({ id, local, ...conflict });
-        // 本机冲突副本默认不纳入，必须再次预览确认；不会用旧版本自动覆盖云端。
-        if (local) state.data.items.push({ ...copy(local), id: uuid(), title: `${local.title.slice(0, 140)}（冲突副本）` });
+        // 冲突副本保留在本机，不参加首次/重复自动纳入；不会用旧版本自动覆盖云端。
+        if (local) {
+          const copyId = uuid();
+          state.data.items.push({ ...copy(local), id: copyId, title: `${local.title.slice(0, 140)}（冲突副本）` });
+          state.heldLocal ??= {}; state.heldLocal[copyId] = { reason: 'conflict-copy', originalId: id };
+        }
         const remote = conflict.remote;
         putItem(state, remote.deleted ? null : remote.item, id);
         state.bindings[id] = { version: remote.version, base: remote.deleted ? null : remote.item, deleted: Boolean(remote.deleted) };

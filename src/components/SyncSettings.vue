@@ -1,39 +1,28 @@
 <script setup>
-import { computed, ref } from 'vue';
-import { syncSupported } from '../sync/syncStore.js';
-const props = defineProps({ snapshot: Object, status: Object, connection: Object });
-const emit = defineEmits(['enabled', 'enroll', 'resolve']);
-const preview = ref(null), selected = ref([]);
-const localOnly = computed(() => props.snapshot?.data.items.filter(item => syncSupported(item) && !props.snapshot.bindings[item.id]) ?? []);
+import { computed } from 'vue';
+import { NODE_ONE_VERSION } from '../sync/ownerPhone.js';
+import { isKnownTestRecord } from '../sync/knownTestRecords.js';
+const props = defineProps({ snapshot: Object, status: Object, connection: Object, ownerPhone: Boolean });
+const emit = defineEmits(['enabled', 'resolve']);
 const pending = computed(() => Object.keys(props.snapshot?.dirty ?? {}).length);
 const conflicts = computed(() => Object.entries(props.snapshot?.blocked ?? {}).map(([id, value]) => ({ id, ...value, local: props.snapshot.data.items.find(item => item.id === id) })));
-function showPreview() {
-  preview.value = { revision: props.snapshot.revision, items: localOnly.value.map(item => ({ id: item.id, title: item.title, type: item.type })) };
-  selected.value = [];
-}
-function confirmPreview() {
-  emit('enroll', { ids: [...selected.value], revision: preview.value.revision });
-  preview.value = null; selected.value = [];
-}
+const testRecords = computed(() => props.snapshot?.data.items.filter(item => isKnownTestRecord(item.id)) ?? []);
+const heldCopies = computed(() => props.snapshot?.data.items.filter(item => props.snapshot.heldLocal?.[item.id]) ?? []);
 </script>
 
 <template>
   <section class="panel sync-settings" aria-label="自动同步设置">
-    <h2>自动同步 <small>首批：待办与项目</small></h2>
-    <p>在原首页正常编辑，先保存到本机；页面打开且联网时自动补传，并获取 GPT 的修改。其他分类暂留本机。服务仍使用测试环境，请先用虚构事项验收。</p>
-    <p>开启后，新建待办和项目自动纳入；已有本机事项仍需下方预览确认。首次连接或增加写权限使用上方连接入口，日常无需上传按钮。</p>
+    <h2>自动同步 <small>节点一 · {{ NODE_ONE_VERSION }}</small></h2>
+    <p>待办与项目在原首页编辑，先保存到本机；联网时自动上传并拉回 GPT 的修改。其他分类继续本机使用，日常无需上传按钮。</p>
+    <p v-if="ownerPhone && !snapshot?.nodeOne">此手机更新后会自动纳入现有待办与项目，复用有效读写连接，无需逐项勾选。</p>
+    <p v-else-if="ownerPhone">已从此手机自动纳入 {{ snapshot?.nodeOne?.enrolledIds.length || 0 }} 项，已有绑定继续复用。</p>
+    <p v-else>此设备不执行首次纳入，本机未绑定记录不会自动上传；首次来源只取正式页面上的手机数据。</p>
     <p role="status">{{ status.message }}<template v-if="snapshot"> · 待同步 {{ pending }} 项 · 待核对 {{ conflicts.length }} 项</template></p>
-    <button v-if="snapshot && !snapshot.enabled" type="button" :disabled="!connection.auth.canWrite" @click="emit('enabled', true)">开启新建事项自动同步</button>
-    <button v-else-if="snapshot" type="button" class="secondary" @click="emit('enabled', false)">暂停自动同步</button>
-    <p v-if="!connection.auth.canWrite">请先登录并授权写入。本机编辑无需登录；退出连接或暂停后，已保存的事项和待同步修改仍保留在本机。</p>
+    <button v-if="snapshot?.enabled" type="button" class="secondary" @click="emit('enabled', false)">暂停自动同步</button>
+    <button v-else-if="snapshot?.nodeOne" type="button" :disabled="!connection.auth.canWrite" @click="emit('enabled', true)">恢复自动同步</button>
+    <button v-else-if="snapshot && !ownerPhone" type="button" :disabled="connection.auth.state !== 'connected'" @click="emit('enabled', true)">启用已绑定事项同步</button>
+    <p v-if="!connection.auth.canWrite">正在等待有效读写连接；已保存的连接会自动恢复。本机无需登录，连接失效时可在上方处理，事项和待同步修改不会清除。</p>
     <p v-if="status.lastSuccess">最后完成同步：{{ new Date(status.lastSuccess).toLocaleString() }}</p>
-    <button v-if="snapshot?.enabled && localOnly.length" type="button" class="secondary" @click="showPreview">预览已有本机事项（{{ localOnly.length }}）</button>
-    <div v-if="preview" class="import-confirm">
-      <p>只将勾选的事项首次纳入当前云端服务；不会自动选中。正式事项请先核对，测试时只选虚构记录。</p>
-      <label v-for="item in preview.items" :key="item.id" class="sync-choice"><input v-model="selected" type="checkbox" :value="item.id">{{ item.title || '未命名项目' }} · {{ item.type === 'todo' ? '待办' : '项目' }}</label>
-      <div class="form-buttons"><button type="button" class="secondary" @click="preview = null">取消</button><button type="button" :disabled="!selected.length || preview.revision !== snapshot.revision" @click="confirmPreview">确认将 {{ selected.length }} 项纳入云端</button></div>
-      <p v-if="preview.revision !== snapshot.revision">事项已变化，请关闭并重新预览。</p>
-    </div>
     <article v-for="conflict in conflicts" :key="conflict.id" class="import-confirm">
       <h3>{{ conflict.local?.title || conflict.remote?.item?.title || '已在本机删除的事项' }}</h3>
       <p>{{ conflict.message }}</p>
@@ -44,13 +33,18 @@ function confirmPreview() {
         <p v-if="conflict.remote.item?.type === 'project'">当前情况：{{ conflict.remote.item.currentSituation }}；下一步：{{ conflict.remote.item.nextStep }}</p>
         <button type="button" class="secondary" @click="emit('resolve', conflict.id)">保留本机副本并采用云端</button>
       </template>
-      <p>本机副本不会自动上传，核对后可另行纳入；不会用旧版本覆盖云端。</p>
+      <p>本机冲突副本继续保留，不自动覆盖或再次上传；核对后可在原事项中处理。</p>
     </article>
+    <p v-if="heldCopies.length">有 {{ heldCopies.length }} 份本机冲突副本，已保留在首页并标注“冲突副本”，暂不自动上传。</p>
+    <details v-if="testRecords.length">
+      <summary>已隔离的历史测试记录（{{ testRecords.length }}）</summary>
+      <p>仅按确定的测试 ID 隔离；原文与完整备份继续保留，不进入正式列表或同步队列。</p>
+      <ul><li v-for="item in testRecords" :key="item.id">{{ item.title }}</li></ul>
+    </details>
   </section>
 </template>
 
 <style scoped>
 .sync-settings button { margin: 6px 8px 6px 0; min-height: 44px; }
-.sync-choice { display: flex; align-items: center; gap: 8px; margin: 10px 0; overflow-wrap: anywhere; }
 .sync-settings p { overflow-wrap: anywhere; }
 </style>

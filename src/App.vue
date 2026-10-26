@@ -6,17 +6,16 @@ import ProjectDialog from './components/ProjectDialog.vue';
 import ProjectCreate from './components/ProjectCreate.vue';
 import OrdinaryItem from './components/OrdinaryItem.vue';
 import CloudConnection from './components/CloudConnection.vue';
-import CloudReadOnly from './components/CloudReadOnly.vue';
-import CloudWrites from './components/CloudWrites.vue';
 import SyncSettings from './components/SyncSettings.vue';
 import { useSyncWorkbench } from './sync/useSyncWorkbench.js';
 import { equal } from './sync/syncStore.js';
+import { isKnownTestRecord } from './sync/knownTestRecords.js';
 import { useCloudWorkbench } from './cloud/useCloudWorkbench.js';
 import { availableUserTags } from './data/userTags.js';
 import { readSplashEnabled, writeSplashEnabled } from './data/splashPreference.js';
 import { COMPLETABLE_TYPES, comparePriorityThenNewest, convertNote, createImportantDate, createNote, createRoutine, createSimpleItem, createTodo, daysUntil, emptyWorkbenchData, isCalendarDate, readWorkbenchData, removeItem, renameItem, toggleTodo, validateWorkbenchData } from './data/workbenchData.js';
 
-// 独立云端测试视图仍保留；正常首页通过本机事务队列同步已明确纳入的事项。
+// 只有原首页这一套工作视图；手机更新后按已授权的节点一规则自动纳入待办和项目。
 const cloud = useCloudWorkbench();
 const cloudState = cloud.state;
 const sync = useSyncWorkbench();
@@ -42,11 +41,13 @@ function toggleSplashPreference() {
 
 // 唯一的持久化数据入口：保存成功后替换 .value，Vue 会更新依赖它的列表，不需要手动改 DOM。
 const workbenchData = ref(emptyWorkbenchData());
+// 已知测试记录按固定 ID 从正式视图排除，完整本机原文仍保留，避免破坏旧备份或转换关联。
+const personalItems = computed(() => workbenchData.value.items.filter(item => !isKnownTestRecord(item.id)));
 // 编辑中的普通事项固定留在原分组；云端完成/删除不能卸载控件并丢掉尚未提交的输入。
 const editingOrdinary = ref({});
 const viewItems = computed(() => [
-  ...workbenchData.value.items.map(item => editingOrdinary.value[item.id] ?? item),
-  ...Object.values(editingOrdinary.value).filter(item => !workbenchData.value.items.some(current => current.id === item.id)),
+  ...personalItems.value.map(item => editingOrdinary.value[item.id] ?? item),
+  ...Object.values(editingOrdinary.value).filter(item => !isKnownTestRecord(item.id) && !personalItems.value.some(current => current.id === item.id)),
 ]);
 function protectOrdinary(id, item) {
   if (item) editingOrdinary.value = { ...editingOrdinary.value, [id]: item };
@@ -90,8 +91,8 @@ const selectedDetailId = ref(null);
 const selectedProjectId = ref(null);
 const projectAtOpen = ref(null);
 const projectDialog = ref(null);
-// 唯一详情从完整集合取项目，完成/恢复改变分组也不会先卸载编辑器。
-const selectedProject = computed(() => selectedProjectId.value && (workbenchData.value.items.find(item => item.type === 'project' && item.id === selectedProjectId.value)
+// 唯一详情从正式集合取项目，完成/恢复改变分组也不会先卸载编辑器。
+const selectedProject = computed(() => selectedProjectId.value && (personalItems.value.find(item => item.type === 'project' && item.id === selectedProjectId.value)
   ?? (projectAtOpen.value?.id === selectedProjectId.value ? projectAtOpen.value : null)));
 const showCompleted = ref(false);
 const showProjects = ref(true);
@@ -121,16 +122,16 @@ void sync.initialize().then(next => {
 }).catch(error => { storageReadable.value = false; message.value = error.message; });
 
 // filter 先生成新数组，再 sort 排序，所以首页分组不会直接重排持久化的 items。
-const routines = computed(() => workbenchData.value.items.filter(item => item.type === 'routine'));
-const importantDates = computed(() => workbenchData.value.items.filter(item => item.type === 'importantDate').sort(comparePriorityThenNewest));
+const routines = computed(() => personalItems.value.filter(item => item.type === 'routine'));
+const importantDates = computed(() => personalItems.value.filter(item => item.type === 'importantDate').sort(comparePriorityThenNewest));
 const openTodos = computed(() => tasks.value.filter(task => !task.done).sort((a, b) => Number(Boolean(b.priority)) - Number(Boolean(a.priority)) || Number(b.urgent) - Number(a.urgent) || b.createdAt.localeCompare(a.createdAt)));
 const completedTodos = computed(() => viewItems.value.filter(item => COMPLETABLE_TYPES.includes(item.type) && item.done).sort((a, b) => b.completedAt.localeCompare(a.completedAt)));
-const projects = computed(() => workbenchData.value.items.filter(item => item.type === 'project' && item.status !== 'done').sort(comparePriorityThenNewest));
-const completedProjects = computed(() => workbenchData.value.items.filter(item => item.type === 'project' && item.status === 'done').sort((a, b) => b.completedAt.localeCompare(a.completedAt)));
+const projects = computed(() => personalItems.value.filter(item => item.type === 'project' && item.status !== 'done').sort(comparePriorityThenNewest));
+const completedProjects = computed(() => personalItems.value.filter(item => item.type === 'project' && item.status === 'done').sort((a, b) => b.completedAt.localeCompare(a.completedAt)));
 const completedCount = computed(() => completedTodos.value.length + completedProjects.value.length);
 const visibleProjects = computed(() => showProjects.value ? projects.value : projects.value.slice(0, 2));
 const visibleOpenTodos = computed(() => showOpenTodos.value ? openTodos.value : openTodos.value.slice(0, 2));
-const availableProjectTags = computed(() => availableUserTags(workbenchData.value.items));
+const availableProjectTags = computed(() => availableUserTags(personalItems.value));
 // 已完成只改变原记录的状态，不搬到另一份数据；这里筛走 done 的事项，已完成区再筛出它们。
 function categoryItems(type) {
   return viewItems.value.filter(item => item.type === type && !item.done).sort((a, b) =>
@@ -399,17 +400,12 @@ async function confirmImport() {
   <main>
     <div class="page-status">
       <span v-if="offlineReady" role="status">页面资源已缓存。</span>
-      <span>{{ cloudState.source === 'local' ? '记录保存在当前设备。' : '正在查看独立云端测试数据，本机事项不变。' }}</span>
+      <span>记录先保存在当前设备。</span>
       <span v-if="syncSnapshot?.enabled" role="status">{{ syncStatus.message }}</span>
     </div>
     <header><span class="eyebrow">Personal Workbench</span><h1>欢迎回来，从哪里开始干活？</h1></header>
     <div v-if="needRefresh" class="notice">有新版本可用。<button @click="updateServiceWorker()">更新应用</button></div>
-    <template v-if="cloudState.source === 'cloud'">
-      <CloudWrites :state="cloud.writes.value" :connection="cloudState" :writer="cloud.writer" />
-      <CloudReadOnly :state="cloudState" @edit-project="cloud.writer.openProject" />
-    </template>
-    <!-- 原首页继续使用同一个 v2 集合；已纳入事项由本机事务队列自动同步，独立测试视图不调用 saveTasks。 -->
-    <template v-else>
+    <!-- 原首页继续使用同一个 v2 集合；待办、项目由本机事务队列自动同步，其他分类继续本机保存。 -->
     <section class="routine-strip" aria-label="日常持续">
       <div class="routine-strip-head">
         <div class="routine-chips">
@@ -561,13 +557,12 @@ async function confirmImport() {
         <p v-if="splashPreferenceError" class="error" role="alert">{{ splashPreferenceError }}</p>
       </div>
     </footer>
-    </template>
-    <ProjectDialog v-if="selectedProject && cloudState.source === 'local'" ref="projectDialog" :key="selectedProject.id" :project="selectedProject" :can-edit="canEditLocal" :available-tags="availableProjectTags" :save-project="saveProject" :delete-project="deleteItem" @close="selectedProjectId = null" />
+    <ProjectDialog v-if="selectedProject" ref="projectDialog" :key="selectedProject.id" :project="selectedProject" :can-edit="canEditLocal" :available-tags="availableProjectTags" :save-project="saveProject" :delete-project="deleteItem" @close="selectedProjectId = null" />
     <!-- 默认收起的连接入口放在整页最后；本机首页继续使用原来的布局。 -->
     <details class="cloud-settings">
       <summary>云端连接</summary>
-      <CloudConnection :state="cloudState" @source="cloud.selectSource" @login="cloud.login()" @enable-write="cloud.login({ write: true })" @resume="cloud.resumeConnection()" @logout="cloud.logout" @refresh="cloud.refresh()" />
-      <SyncSettings :snapshot="syncSnapshot" :status="syncStatus" :connection="cloudState" @enabled="sync.enabled" @enroll="sync.enroll" @resolve="sync.resolve" />
+      <CloudConnection :state="cloudState" @login="cloud.login()" @enable-write="cloud.login({ write: true })" @resume="cloud.resumeConnection()" @logout="cloud.logout" />
+      <SyncSettings :snapshot="syncSnapshot" :status="syncStatus" :connection="cloudState" :owner-phone="sync.ownerPhone" @enabled="sync.enabled" @resolve="sync.resolve" />
     </details>
   </main>
 </template>

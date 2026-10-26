@@ -47,7 +47,7 @@ export function createCloudController({ auth, api, now = Date.now, isOnline = ()
     if (source === 'cloud' && (state.auth.state === 'connected' || state.auth.remembered)) void refresh();
   }
   async function start(callback) {
-    if (callback) publish({ source: 'cloud' });
+    // 授权返回仍进入原首页；节点一的后台同步负责纳入与读取，不再切入测试视图。
     try { callback ? await auth.finish(callback) : await auth.restore(); }
     catch (error) { if (error?.name !== 'AbortError') publish({ message: connectionError(error).message }); }
   }

@@ -3,13 +3,18 @@ import { createSyncStore } from './syncStore.js';
 import { createSyncApi } from './syncApi.js';
 import { createSyncEngine } from './syncEngine.js';
 import { sharedCloudAuth } from '../cloud/useCloudWorkbench.js';
+import { isOwnerPhoneTarget, prepareOwnerPhoneSync } from './ownerPhone.js';
 
 export function useSyncWorkbench() {
   const snapshot = shallowRef(null);
   const status = shallowRef({ phase: 'starting', message: '正在读取本机数据。', lastSuccess: null });
-  const store = createSyncStore();
+  const ownerPhone = isOwnerPhoneTarget();
+  const store = createSyncStore({ ownerPhone });
   const api = createSyncApi({ auth: sharedCloudAuth });
-  const engine = createSyncEngine({ store, api, onStatus: next => { status.value = { ...status.value, ...next }; } });
+  const engine = createSyncEngine({ store, api,
+    beforeRun: () => prepareOwnerPhoneSync(store, sharedCloudAuth),
+    onStatus: next => { status.value = { ...status.value, ...next }; },
+  });
   const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('personal-workbench.sync.v1') : null;
   const unsubscribe = store.subscribe(next => { snapshot.value = next; channel?.postMessage('changed'); });
   const fail = error => { status.value = { ...status.value, phase: 'failed', message: `同步失败；待同步修改保留在本机。${error.message || ''}` }; };
@@ -40,7 +45,7 @@ export function useSyncWorkbench() {
     document.removeEventListener('visibilitychange', resume); void store.close();
   });
   return {
-    snapshot, status,
+    snapshot, status, ownerPhone,
     async initialize() { snapshot.value = await store.read(); engine.wake(); return snapshot.value; },
     async save(data, revision, options) {
       const saved = await store.save(data, revision, options);

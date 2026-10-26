@@ -21,7 +21,7 @@ export function createOAuthClient(config, fetcher = globalThis.fetch) {
     async register(signal, scope = config.scope) {
       const as = await discover(signal);
       const response = await fetcher(as.registration_endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store', credentials: 'omit', signal: options(signal).signal,
-        body: JSON.stringify({ client_name: scope.includes('workbench:write') ? '个人工作台网页（云端测试读写）' : '个人工作台网页（只读）', redirect_uris: [config.redirectUri], token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], scope }) });
+        body: JSON.stringify({ client_name: scope.includes('workbench:write') ? '个人工作台网页（读写）' : '个人工作台网页（只读）', redirect_uris: [config.redirectUri], token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], scope }) });
       if (!response.ok) throw new CloudError('configuration', '网页连接初始化失败，请稍后重试。');
       const result = await response.json();
       if (typeof result.client_id !== 'string' || result.client_secret) throw new CloudError('configuration', '云端没有返回公共客户端，已停止连接。');

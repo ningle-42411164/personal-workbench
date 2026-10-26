@@ -1,6 +1,8 @@
 // 每次网络发送使用已经落盘的不可变请求；响应丢失、刷新或另一个窗口重试均复用它。
 // 定时器只负责页面打开时的同步，不承诺手机关闭应用后仍在后台联网。
-export function createSyncEngine({ store, api, isOnline = () => globalThis.navigator?.onLine !== false, onStatus = () => {}, now = Date.now, schedule = setTimeout, cancel = clearTimeout } = {}) {
+import { equal } from './syncStore.js';
+
+export function createSyncEngine({ store, api, beforeRun = () => store.read(), isOnline = () => globalThis.navigator?.onLine !== false, onStatus = () => {}, now = Date.now, schedule = setTimeout, cancel = clearTimeout } = {}) {
   let running, timer, stopped = false, failures = 0, generation = 0, request;
   const publish = (phase, message, extra = {}) => onStatus({ phase, message, ...extra });
   async function run() {
@@ -13,7 +15,8 @@ export function createSyncEngine({ store, api, isOnline = () => globalThis.navig
     const signal = request.signal;
     const operation = (async () => {
       try {
-        let state = await store.read();
+        let state = await beforeRun();
+        if (!active()) return;
         if (!state.enabled) { publish('paused', '自动同步未开启；本机仍可编辑。'); return; }
         if (!isOnline()) { publish('offline', '离线：待同步修改已保存在本机，联网后自动继续。'); return; }
         const pending = Object.keys(state.dirty).length;
@@ -29,7 +32,11 @@ export function createSyncEngine({ store, api, isOnline = () => globalThis.navig
             if (!active()) return;
             if (error.kind === 'conflict') {
               const remote = await api.get(job.id, signal);
-              if (active()) await store.block(job, error, remote, active);
+              if (active()) {
+                // 同 ID 同内容已经在云端时仅接续绑定；不同内容/删除标记仍保留双方，绝不覆盖。
+                if (error.code === 'ITEM_ID_EXISTS' && job.expectedVersion === 0 && !remote.deleted && equal(job.item, remote.item)) await store.acknowledge(job, remote, active);
+                else await store.block(job, error, remote, active);
+              }
             } else if (error.kind === 'rejected') await store.block(job, error, null, active);
             else throw error;
           }

@@ -15,7 +15,7 @@ const data = items => ({ schemaVersion: 2, items });
 function memoryStorage(value = null) { let raw = value; return { getItem: () => raw, setItem: (_key, value) => { raw = value; } }; }
 function setup(t, items = []) {
   const indexedDB = new IDBFactory(), storage = memoryStorage(JSON.stringify(data(items)));
-  const store = createSyncStore({ indexedDB, storage });
+  const store = createSyncStore({ indexedDB, storage, ownerPhone: true });
   const db = sqliteD1();
   const service = new WorkbenchService(new D1Store(db, 'fictional-owner'), { id: 'fictional-owner', scopes: [READ_SCOPE, WRITE_SCOPE] });
   const controls = { online: true, workerFailure: null, loseReply: false, corruptReply: false, denied: false, calls: [], statuses: [] };
