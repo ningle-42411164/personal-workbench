@@ -4,6 +4,7 @@ import { WorkbenchService, READ_SCOPE, WRITE_SCOPE } from './service.js';
 import { handleApi, json } from './http.js';
 import { handleAuthorization } from './authorization.js';
 import { ApiError, publicError } from './errors.js';
+import { diagnoseTokenResponse } from './authorizationDiagnostics.js';
 
 export function validateConfig(env) {
   let base;
@@ -81,11 +82,18 @@ export default {
         resourceMetadata: { resource: env.PUBLIC_BASE_URL, authorization_servers: [env.PUBLIC_BASE_URL] },
         clientIdMetadataDocumentEnabled: true,
       });
-      const response = await provider.fetch(await boundedRequest(request), env, ctx);
+      const bounded = await boundedRequest(request);
+      let stage;
+      if (url.pathname === '/oauth/token' && request.method === 'POST') {
+        const grant = new URLSearchParams(await bounded.clone().text()).get('grant_type');
+        stage = grant === 'authorization_code' ? 'code_exchange' : grant === 'refresh_token' ? 'token_refresh' : 'token_request';
+      }
+      let response = await provider.fetch(bounded, env, ctx);
+      if (stage) response = await diagnoseTokenResponse(response, stage);
       return withHeaders(response, origin, true);
     } catch (error) {
       const failure = publicError(error);
-      return withHeaders(json({ code: failure.code, message: failure.message }, failure.status), origin, true);
+      return withHeaders(json({ code: failure.code, message: failure.message, ...(failure.diagnostic ? { diagnostic: failure.diagnostic } : {}) }, failure.status), origin, true);
     }
   },
 };

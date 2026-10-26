@@ -1,5 +1,6 @@
 import { ApiError } from './errors.js';
 import { READ_SCOPE, WRITE_SCOPE } from './service.js';
+import { authorizationStage } from './authorizationDiagnostics.js';
 
 export function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -35,13 +36,13 @@ export async function handleAuthorization(request, env) {
   const url = new URL(request.url);
   const oauth = env.OAUTH_PROVIDER;
   if (url.pathname === '/authorize' && request.method === 'GET') {
-    const authRequest = await oauth.parseAuthRequest(request);
+    const authRequest = await authorizationStage('authorize_parse', () => oauth.parseAuthRequest(request));
     if (!authRequest.codeChallenge || authRequest.codeChallengeMethod !== 'S256') throw new ApiError(400, 'PKCE_REQUIRED', '授权必须使用 PKCE S256。');
     if (!authRequest.scope.includes(READ_SCOPE) || authRequest.scope.some(scope => ![READ_SCOPE, WRITE_SCOPE, 'offline_access'].includes(scope))) {
       throw new ApiError(400, 'INVALID_SCOPE', '授权范围不受支持。');
     }
-    const description = await oauth.describeConsent(authRequest);
-    const consent = await oauth.beginConsent(authRequest);
+    const description = await authorizationStage('authorize_describe', () => oauth.describeConsent(authRequest));
+    const consent = await authorizationStage('consent_begin', () => oauth.beginConsent(authRequest));
     const headers = new Headers(consent.headers);
     headers.set('Content-Type', 'text/html; charset=utf-8');
     headers.set('Cache-Control', 'no-store');
@@ -61,12 +62,12 @@ export async function handleAuthorization(request, env) {
     const handle = form.get('handle');
     if (typeof handle !== 'string' || handle.length > 2048) throw new ApiError(400, 'INVALID_CONSENT', '授权请求无效。');
     if (form.get('decision') === 'deny') {
-      const denied = await oauth.denyConsent(request, handle);
+      const denied = await authorizationStage('consent_deny', () => oauth.denyConsent(request, handle));
       return redirect(denied.redirectTo, denied.headers);
     }
     if (form.get('decision') !== 'allow') throw new ApiError(400, 'INVALID_CONSENT', '请选择允许或拒绝。');
-    const approved = await oauth.approveConsent(request, handle);
-    const upstream = await oauth.beginUpstream(approved.request, { headers: approved.headers });
+    const approved = await authorizationStage('consent_approve', () => oauth.approveConsent(request, handle));
+    const upstream = await authorizationStage('github_begin', () => oauth.beginUpstream(approved.request, { headers: approved.headers }));
     const github = new URL('https://github.com/login/oauth/authorize');
     github.search = new URLSearchParams({ client_id: env.GITHUB_CLIENT_ID, state: upstream.state,
       redirect_uri: `${env.PUBLIC_BASE_URL}/auth/github/callback`, scope: 'read:user' }).toString();
@@ -74,13 +75,13 @@ export async function handleAuthorization(request, env) {
   }
   if (url.pathname === '/auth/github/callback' && request.method === 'GET') {
     // 库验证浏览器绑定的 state 并一次性消费，不能用 query 中的 userId 代替身份校验。
-    const resumed = await oauth.finishUpstream(request);
+    const resumed = await authorizationStage('github_return', () => oauth.finishUpstream(request));
     if (url.searchParams.has('error')) throw new ApiError(401, 'IDENTITY_REJECTED', 'GitHub 授权已取消。');
     const code = url.searchParams.get('code');
     if (!code || code.length > 1024) throw new ApiError(400, 'IDENTITY_REJECTED', '缺少有效的身份授权码。');
-    const identity = await readGithubIdentity(code, env);
-    const completed = await oauth.completeAuthorization({ request: resumed.request, userId: identity.userId,
-      metadata: { source: 'github' }, scope: resumed.request.scope, props: identity });
+    const identity = await authorizationStage('github_identity', () => readGithubIdentity(code, env));
+    const completed = await authorizationStage('code_issue', () => oauth.completeAuthorization({ request: resumed.request, userId: identity.userId,
+      metadata: { source: 'github' }, scope: resumed.request.scope, props: identity }));
     return redirect(completed.redirectTo, resumed.headers);
   }
   return new Response('Not found', { status: 404 });
