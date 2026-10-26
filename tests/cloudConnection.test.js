@@ -186,5 +186,29 @@ test('只读 API 完整分页保留版本、只发送 GET，未认证最多续�
   const records = await api.listItems();
   assert.equal(records.length, 2); assert.equal(records[0].version, 2);
   assert.equal(renews, 1); assert.ok(calls.every(call => call.method === 'GET'));
-  assert.deepEqual(Object.keys(api), ['listItems']);
+  assert.deepEqual(Object.keys(api).sort(), ['createTodo', 'getProject', 'listItems', 'updateProject']);
+});
+
+test('写入必须显式升级；拒绝不丢原只读会话，续期不能静默增加权限', async () => {
+  const s = setup(); await authorize(s);
+  assert.equal(s.auth.getStatus().canWrite, false);
+  const readSession = await s.vault.get('session');
+  let registrationScope, authorizationScope;
+  s.client.register = async (_signal, scope) => { registrationScope = scope; return 'fake-public-write-client'; };
+  s.client.authorize = async (_id, state, _verifier, _signal, scope) => { authorizationScope = scope; return `https://auth.test/?state=${state}`; };
+  await s.auth.login({ write: true });
+  let transaction = await s.vault.get('transaction');
+  assert.equal(registrationScope, CLOUD_CONFIG.writeScope); assert.equal(authorizationScope, CLOUD_CONFIG.writeScope);
+  await assert.rejects(s.auth.finish(`${CLOUD_CONFIG.redirectUri}?state=${transaction.state}&error=access_denied`));
+  assert.deepEqual(await s.vault.get('session'), readSession);
+  await s.auth.restore(); assert.equal(s.auth.getStatus().canWrite, false);
+  s.client.refresh = async () => ({ ...fakeTokens(4), scope: CLOUD_CONFIG.writeScope });
+  await assert.rejects(s.auth.restore(true));
+  assert.equal(s.auth.getStatus().canWrite, false);
+  await s.auth.login({ write: true }); transaction = await s.vault.get('transaction');
+  s.client.exchange = async () => ({ ...fakeTokens(5), scope: CLOUD_CONFIG.writeScope });
+  await s.auth.finish(`${CLOUD_CONFIG.redirectUri}?state=${transaction.state}&code=fake-code`);
+  assert.equal(s.auth.getStatus().canWrite, true);
+  const again = createCloudAuth({ vault: s.vault, client: s.client, now: () => 101000 });
+  await again.restore(); assert.equal(again.getStatus().canWrite, true);
 });

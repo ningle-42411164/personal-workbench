@@ -1,6 +1,6 @@
 import { CloudError, connectionError } from './cloudConfig.js';
 
-// 本机数据不在这个控制器里；来源切换只控制云端请求和只读视图。
+// 本机数据不在这个控制器里；来源切换只控制云端请求和独立测试视图。
 export function createCloudController({ auth, api, now = Date.now, isOnline = () => globalThis.navigator?.onLine !== false, navigate = url => window.location.assign(url), announceLogout = () => {} }) {
   let state = { source: 'local', auth: auth.getStatus(), items: [], readState: 'idle', stale: false, lastReadAt: null, message: '' };
   let epoch = 0;
@@ -50,9 +50,9 @@ export function createCloudController({ auth, api, now = Date.now, isOnline = ()
     try { callback ? await auth.finish(callback) : await auth.restore(); }
     catch (error) { if (error?.name !== 'AbortError') publish({ message: connectionError(error).message }); }
   }
-  async function login() {
+  async function login(options) {
     cancelRead();
-    try { const url = await auth.login(); navigate(url); }
+    try { const url = await auth.login(options); navigate(url); }
     catch (error) { if (error?.name !== 'AbortError') publish({ message: connectionError(error).message }); }
   }
   async function logout() {
@@ -74,8 +74,13 @@ export function createCloudController({ auth, api, now = Date.now, isOnline = ()
     lastReadStartedAt = -Infinity;
     publish({ readState: 'failed', stale: state.lastReadAt !== null, message: '离线／内容可能已过期。联网后可重新读取；本批没有离线写入。' });
   }
+  async function refreshAfterWrite() {
+    // 保存前已发出的 GET 不能冒充保存后的确认读取。
+    if (reading) await reading;
+    return refresh('manual');
+  }
   return {
-    start, login, logout, refresh, selectSource, externalLogout, offline,
+    start, login, logout, refresh, refreshAfterWrite, selectSource, externalLogout, offline,
     getState: () => state,
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     stop() { cancelRead(); unsubscribe(); listeners.clear(); },

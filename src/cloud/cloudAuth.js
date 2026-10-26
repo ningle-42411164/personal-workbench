@@ -13,22 +13,26 @@ export function createCloudAuth({ config = CLOUD_CONFIG, vault = createCredentia
   let status = { state: 'checking', message: '正在检查已保存的连接。', remembered: false };
   const listeners = new Set();
   function publish(state, message, remembered = status.remembered) {
-    status = { state, message, remembered }; listeners.forEach(listener => listener(status));
+    status = { state, message, remembered, canWrite: state === 'connected' && access?.canWrite === true }; listeners.forEach(listener => listener(status));
   }
   function cancel() { generation++; controller.abort(); controller = new AbortController(); access = undefined; }
   function ensureCurrent(start) { if (start !== generation) throw interrupted(); }
   async function accept(result, saved, revision, start) {
     ensureCurrent(start);
-    const scopes = typeof result.scope === 'string' ? result.scope.split(' ') : [];
-    if (!result.access_token || !result.refresh_token || (scopes.length && (!scopes.includes('workbench:read') || scopes.includes('workbench:write')))) {
-      throw new CloudError('configuration', '云端没有返回可续期的只读连接，请重新授权。');
+    // 旧的 1A 会话没有 scope 时按只读处理；续期不能把只读连接升级为写入。
+    const scope = result.scope ?? saved.scope ?? config.scope;
+    const scopes = scope.split(' ');
+    if (!result.access_token || !result.refresh_token || !scopes.includes('workbench:read') ||
+        scopes.some(value => !['workbench:read', 'workbench:write', 'offline_access'].includes(value)) ||
+        (scopes.includes('workbench:write') && !(saved.scope ?? config.scope).includes('workbench:write'))) {
+      throw new CloudError('configuration', '云端返回的权限与本次授权不符，请重新授权。');
     }
-    const session = { ...saved, refreshToken: result.refresh_token };
+    const session = { ...saved, scope, refreshToken: result.refresh_token };
     if (!await vault.put('session', session, revision)) throw interrupted();
     ensureCurrent(start);
     if (await vault.revision() !== revision) throw interrupted();
-    access = { token: result.access_token, expiresAt: now() + Math.min(Number(result.expires_in) || config.accessTokenSeconds, config.accessTokenSeconds) * 1000, revision };
-    publish('connected', '只读连接已恢复；本机事项仍独立保存。', true);
+    access = { token: result.access_token, canWrite: scopes.includes('workbench:write'), expiresAt: now() + Math.min(Number(result.expires_in) || config.accessTokenSeconds, config.accessTokenSeconds) * 1000, revision };
+    publish('connected', `${access.canWrite ? '云端测试读写' : '只读'}连接已恢复；本机事项仍独立保存。`, true);
     return access.token;
   }
   function failed(error) {
@@ -51,7 +55,7 @@ export function createCloudAuth({ config = CLOUD_CONFIG, vault = createCredentia
         await vault.clearSession(); access = undefined;
         publish('expired', '保存的连接已到期，请重新授权。', false); return null;
       }
-      publish('checking', '正在安全恢复只读连接。', true);
+      publish('checking', '正在安全恢复连接。', true);
       try {
         const result = await client.refresh(saved.clientId, saved.refreshToken, signal);
         return await accept(result, saved, revision, start);
@@ -59,7 +63,7 @@ export function createCloudAuth({ config = CLOUD_CONFIG, vault = createCredentia
         ensureCurrent(start);
         if (['invalid_grant', 'invalid_client', 'invalid_token'].includes(error?.error)) {
           await vault.clearSession();
-          if (error.error === 'invalid_client') await vault.remove('client');
+          if (error.error === 'invalid_client') await vault.remove(saved.scope?.includes('workbench:write') ? 'client-write' : 'client');
           access = undefined; publish('expired', '连接已失效或被撤销，请重新授权。', false); return null;
         }
         throw error;
@@ -70,7 +74,7 @@ export function createCloudAuth({ config = CLOUD_CONFIG, vault = createCredentia
     catch (error) { ensureCurrent(start); failed(error); throw connectionError(error); }
     finally { if (renewing === operation) renewing = undefined; }
   }
-  async function login() {
+  async function login({ write = false } = {}) {
     cancel();
     const start = generation;
     const signal = controller.signal;
@@ -78,17 +82,19 @@ export function createCloudAuth({ config = CLOUD_CONFIG, vault = createCredentia
     try {
       return await vault.withLock(async () => {
         const revision = await vault.revision();
-        let registration = await vault.get('client');
+        const scope = write ? config.writeScope : config.scope;
+        const clientKey = write ? 'client-write' : 'client';
+        let registration = await vault.get(clientKey);
         // 每个浏览器/PWA 一个公共客户端，避免重新登录撤销另一设备的授权。
         if (!registration) {
-          registration = { clientId: await client.register(signal) };
+          registration = { clientId: await client.register(signal, scope) };
           ensureCurrent(start);
-          if (!await vault.put('client', registration, revision)) throw interrupted();
+          if (!await vault.put(clientKey, registration, revision)) throw interrupted();
         }
         const state = cryptography.randomUUID();
         const verifier = cryptography.randomUUID() + cryptography.randomUUID();
-        const transaction = { clientId: registration.clientId, state, verifier, expiresAt: now() + config.transactionLifetimeMs, revision };
-        const url = await client.authorize(transaction.clientId, state, verifier, signal);
+        const transaction = { clientId: registration.clientId, scope, state, verifier, expiresAt: now() + config.transactionLifetimeMs, revision };
+        const url = await client.authorize(transaction.clientId, state, verifier, signal, scope);
         ensureCurrent(start);
         if (!await vault.put('transaction', transaction, revision)) throw interrupted();
         return url;
@@ -98,7 +104,7 @@ export function createCloudAuth({ config = CLOUD_CONFIG, vault = createCredentia
   async function finish(callback) {
     const start = generation;
     const signal = controller.signal;
-    publish('checking', '正在完成只读授权。');
+    publish('checking', '正在完成授权。');
     try {
       return await vault.withLock(async () => {
         const transaction = await vault.get('transaction');
@@ -111,7 +117,13 @@ export function createCloudAuth({ config = CLOUD_CONFIG, vault = createCredentia
         if (url.searchParams.has('error')) throw new CloudError('cancelled', '授权已取消，本机功能仍可使用。');
         if (!url.searchParams.get('code')) throw new CloudError('callback', '授权返回缺少有效结果，请重新登录。');
         const result = await client.exchange(transaction.clientId, callback, transaction.state, transaction.verifier, signal);
-        return accept(result, { clientId: transaction.clientId, grantExpiresAt: now() + config.grantLifetimeMs }, transaction.revision, start);
+        const previous = await vault.get('session');
+        const token = await accept(result, { clientId: transaction.clientId, scope: transaction.scope ?? config.scope, grantExpiresAt: now() + config.grantLifetimeMs }, transaction.revision, start);
+        // 新的独立写客户端成功后，尽力撤销被替换的只读授权；取消升级不丢原连接。
+        if (previous && previous.clientId !== transaction.clientId) {
+          try { await client.revoke(previous.clientId, previous.refreshToken); } catch { /* 本机已只保存新会话，旧授权最长按原期限失效。 */ }
+        }
+        return token;
       });
     } catch (error) {
       ensureCurrent(start);

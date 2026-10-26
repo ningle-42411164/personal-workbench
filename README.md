@@ -1,6 +1,6 @@
 # Personal Workbench
 
-A lightweight personal workspace for everyday items and projects, with a Chinese-language interface, browser-local storage, and an optional owner-only, read-only cloud test view.
+A lightweight personal workspace for everyday items and projects, with a Chinese-language interface, browser-local storage, and an optional owner-only cloud test view.
 
 [Try it online](https://ningle-42411164.github.io/personal-workbench/)
 
@@ -14,14 +14,14 @@ A lightweight personal workspace for everyday items and projects, with a Chinese
 - **Projects:** quick or full creation, field-by-field editing, status, optional user tags, start and due dates, current situation, and next step. Creation adds one history entry; subsequent changes to the current situation append timestamped updates. Completed projects retain their details and history.
 - **User tags:** projects can have no tags, one tag, or multiple tags. Twelve default choices are available independently of existing items and are combined with tags already saved in the data. User tags are separate from system priority indicators.
 - **JSON backups:** export the complete versioned data, or import a validated backup after confirming replacement of all current records. Import does not merge records.
-- **Read-only cloud connection (1A):** choose local data or an isolated cloud test view. Local use needs no login. GitHub identity and PKCE establish a read-only connection; encrypted rotating refresh credentials in a separate IndexedDB allow restoration after reopening. Cloud failures preserve the current snapshot, and logout does not modify local items. This batch has no cloud create/edit/delete or offline writes.
+- **Cloud test connection (1A/1B):** expand “云端连接” at the bottom to select the isolated cloud view. Local use needs no login. First authorization is read-only; a separate explicit authorization enables creating to-dos and editing supported project fields. Encrypted rotating refresh credentials in a separate IndexedDB restore the connection after reopening. Failed saves retain drafts, uncertain retries reuse the exact request, and version conflicts require manual comparison. Cloud failures preserve the current snapshot. Local items are never automatically uploaded; full offline synchronization is not implemented.
 - **PWA support:** local resource caching, update notifications, app icons, and a skippable launch screen shown once per browser session, with reduced-motion support.
 
 ## Stack
 
 Vue 3, JavaScript, Vite, and `vite-plugin-pwa`. Records are stored in `localStorage` under `personal-workbench.data.v2`, using `schemaVersion: 2` and one `items` collection. The launch screen uses `sessionStorage` for its session flag.
 
-The separate [Cloudflare Worker service](services/workbench-api/README.md) is shared with ChatGPT MCP. There is no user registration, multi-user account system, automatic migration, or full offline synchronization. See the [1A authentication, limits, tests, and code index](docs/mobile-cloud-1a-2026-10-26.md).
+The separate [Cloudflare Worker service](services/workbench-api/README.md) is shared with ChatGPT MCP. There is no user registration, multi-user account system, automatic migration, or full offline synchronization. See [1A authentication](docs/mobile-cloud-1a-2026-10-26.md) and the [1B implementation, acceptance, and learning index](docs/mobile-cloud-1b-2026-10-26.md).
 
 ## Local development
 

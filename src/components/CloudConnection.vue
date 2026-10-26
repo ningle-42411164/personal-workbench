@@ -1,9 +1,9 @@
 <script setup>
 import { computed } from 'vue';
 const props = defineProps({ state: { type: Object, required: true } });
-defineEmits(['source', 'login', 'logout', 'refresh']);
+defineEmits(['source', 'login', 'logout', 'refresh', 'enable-write']);
 const busy = computed(() => ['checking', 'authorizing', 'signingout'].includes(props.state.auth.state));
-const labels = { checking: '恢复连接中', authorizing: '等待授权', signingout: '正在退出', connected: '已连接 · 只读', disconnected: '未连接', expired: '授权已到期', offline: '离线／连接待恢复', error: '连接未完成' };
+const labels = { checking: '恢复连接中', authorizing: '等待授权', signingout: '正在退出', connected: '已连接', disconnected: '未连接', expired: '授权已到期', offline: '离线／连接待恢复', error: '连接未完成' };
 const lastRead = computed(() => props.state.lastReadAt === null ? '尚未成功读取' : new Date(props.state.lastReadAt).toLocaleString());
 </script>
 
@@ -14,11 +14,12 @@ const lastRead = computed(() => props.state.lastReadAt === null ? '尚未成功�
         <button type="button" :class="{ secondary: state.source !== 'local' }" :aria-pressed="state.source === 'local'" @click="$emit('source', 'local')">本机数据</button>
         <button type="button" :class="{ secondary: state.source !== 'cloud' }" :aria-pressed="state.source === 'cloud'" @click="$emit('source', 'cloud')">云端测试</button>
       </div>
-      <span class="connection-label" role="status">{{ labels[state.auth.state] || '未连接' }}</span>
+      <span class="connection-label" role="status">{{ labels[state.auth.state] || '未连接' }}{{ state.auth.state === 'connected' ? (state.auth.canWrite ? ' · 测试读写' : ' · 只读') : '' }}</span>
     </div>
-    <p>{{ state.source === 'local' ? '当前设备的事项照常使用，无需登录。' : '云端为独立只读测试视图，不会替换当前设备的事项。' }}</p>
+    <p>{{ state.source === 'local' ? '当前设备的事项照常使用，无需登录。' : '独立云端测试：仅手动新建待办和编辑项目，不上传本机事项；尚无离线同步。' }}</p>
     <div class="cloud-actions">
       <button v-if="state.auth.state !== 'connected'" class="secondary" type="button" :disabled="busy" @click="$emit('login')">{{ state.auth.state === 'expired' ? '重新授权' : '登录云端' }}</button>
+      <button v-if="state.source === 'cloud' && !state.auth.canWrite" class="secondary" type="button" :disabled="busy" @click="$emit('enable-write')">授权云端测试写入</button>
       <button v-if="state.auth.remembered || state.auth.state === 'connected' || state.auth.state === 'error'" class="secondary" type="button" @click="$emit('logout')">退出云端</button>
       <button class="secondary" type="button" :disabled="state.source !== 'cloud' || state.readState === 'loading' || (!state.auth.remembered && state.auth.state !== 'connected')" @click="$emit('refresh')">{{ state.readState === 'loading' ? '正在读取…' : '重新读取' }}</button>
     </div>

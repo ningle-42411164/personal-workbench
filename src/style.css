@@ -127,6 +127,8 @@ footer { margin-top: 28px; font-size: 13px; line-height: 1.7; }
 .splash-toggle { min-height: 36px; padding: 6px 12px; font-size: 12px; flex: 0 0 auto; }
 .secondary { background: #e4e9e3; color: #244d43; }
 .cloud-connection { margin-top: 20px; }
+.cloud-settings { margin-top: 28px; border-top: 1px solid #dfe5df; padding-top: 14px; }
+.cloud-settings > summary { min-height: 44px; padding: 10px 0; color: #65766e; font-size: 13px; cursor: pointer; }
 .cloud-connection-head, .cloud-list-heading, .cloud-record-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
 .source-buttons, .cloud-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .source-buttons button, .cloud-actions button { min-height: 44px; }
@@ -137,6 +139,13 @@ footer { margin-top: 28px; font-size: 13px; line-height: 1.7; }
 .cloud-record h3 { margin: 0; font-size: 17px; }
 .cloud-record time { display: block; font-size: 12px; color: #65766e; }
 .cloud-readonly details { font-size: 14px; line-height: 1.8; }
+.cloud-writes fieldset { min-width: 0; margin: 16px 0; padding: 14px; border: 1px solid #dfe5df; border-radius: 10px; }
+.cloud-writes legend { color: #526a5c; font-size: 13px; }
+.cloud-writes label { display: block; margin-bottom: 12px; }
+.cloud-writes input:not([type=checkbox]), .cloud-writes select { display: block; width: 100%; margin-top: 6px; }
+.cloud-writes .cloud-check { display: flex; gap: 8px; align-items: center; }
+.cloud-writes button, .cloud-record > button { min-height: 44px; margin-top: 8px; }
+.cloud-conflict dd { margin: 6px 0 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .backup-label { display: block; margin-top: 18px; font-size: 14px; font-weight: 600; }
 .import-confirm { margin-top: 16px; padding: 16px; border: 1px solid #a8b9af; border-radius: 10px; background: #fff; }
 .import-confirm p { margin-top: 0; color: #243d36; }

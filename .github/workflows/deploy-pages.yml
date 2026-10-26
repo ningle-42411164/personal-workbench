@@ -27,7 +27,7 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Test local data and read-only cloud connection
+      - name: Test local data and isolated cloud operations
         run: npm test
       - name: Build site
         run: npm run build

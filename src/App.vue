@@ -7,6 +7,7 @@ import ProjectCreate from './components/ProjectCreate.vue';
 import OrdinaryItem from './components/OrdinaryItem.vue';
 import CloudConnection from './components/CloudConnection.vue';
 import CloudReadOnly from './components/CloudReadOnly.vue';
+import CloudWrites from './components/CloudWrites.vue';
 import { useCloudWorkbench } from './cloud/useCloudWorkbench.js';
 import { availableUserTags } from './data/userTags.js';
 import { readSplashEnabled, writeSplashEnabled } from './data/splashPreference.js';
@@ -369,9 +370,11 @@ function confirmImport() {
       <span>{{ cloudState.source === 'local' ? '记录保存在当前设备。' : '正在查看独立云端测试数据，本机事项不变。' }}</span>
     </div>
     <header><span class="eyebrow">Personal Workbench</span><h1>欢迎回来，从哪里开始干活？</h1></header>
-    <CloudConnection :state="cloudState" @source="cloud.selectSource" @login="cloud.login" @logout="cloud.logout" @refresh="cloud.refresh()" />
     <div v-if="needRefresh" class="notice">有新版本可用。<button @click="updateServiceWorker()">更新应用</button></div>
-    <CloudReadOnly v-if="cloudState.source === 'cloud'" :state="cloudState" />
+    <template v-if="cloudState.source === 'cloud'">
+      <CloudWrites :state="cloud.writes.value" :connection="cloudState" :writer="cloud.writer" />
+      <CloudReadOnly :state="cloudState" @edit-project="cloud.writer.openProject" />
+    </template>
     <!-- 本机视图保留原读写和导入导出；云端结果没有调用这些保存入口。 -->
     <template v-else>
     <section class="routine-strip" aria-label="日常持续">
@@ -528,5 +531,10 @@ function confirmImport() {
       </div>
     </footer>
     </template>
+    <!-- 默认收起的连接入口放在整页最后；本机首页继续使用原来的布局。 -->
+    <details class="cloud-settings">
+      <summary>云端连接</summary>
+      <CloudConnection :state="cloudState" @source="cloud.selectSource" @login="cloud.login()" @enable-write="cloud.login({ write: true })" @logout="cloud.logout" @refresh="cloud.refresh()" />
+    </details>
   </main>
 </template>
