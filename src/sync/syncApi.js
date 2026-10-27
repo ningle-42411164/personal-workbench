@@ -4,10 +4,11 @@ import { normalizeUserTags } from '../data/userTags.js';
 import { equal, syncSupported } from './syncStore.js';
 
 const fail = (kind, message, code = '') => Object.assign(new CloudError(kind, message), { code });
-function record(value, id) {
+function record(value, id, references = []) {
   if (!Number.isSafeInteger(value?.version) || value.version < 1 || (value.deleted ? value.id : value.item?.id) !== id) throw fail('network', '未能核对服务端回执，将保留原请求重试。');
   // 仅校验当前同步范围；升级范围会重置一次游标，避免漏掉旧客户端跳过的记录。
-  if (!value.deleted && syncSupported(value.item)) validateWorkbenchData({ schemaVersion: 2, items: [value.item] });
+  // 关联目标可能在下一页；原关联字段不删改，最终由仓库收齐分页后整体校验。
+  if (!value.deleted && syncSupported(value.item) && (!value.item.convertedToId || references.length)) validateWorkbenchData({ schemaVersion: 2, items: [value.item, ...references.filter(item => item.id !== id)] });
   return value;
 }
 
@@ -36,6 +37,17 @@ export function createSyncApi({ auth, fetcher = globalThis.fetch, issuer = CLOUD
   }
   return {
     async send(job, signal) {
+      if (job.entries) {
+        const result = await request('/api/sync/batch', 'POST', { requestId: job.requestId, entries: job.entries }, signal);
+        if (!Array.isArray(result?.records) || result.records.length !== job.entries.length || new Set(result.records.map(value => value.item?.id ?? value.id)).size !== job.entries.length) throw fail('network', '关联回执不完整，原请求保留。');
+        const references = result.records.flatMap(value => value.item ? [value.item] : []);
+        for (const entry of job.entries) {
+          const confirmed = record(result.records.find(value => (value.item?.id ?? value.id) === entry.id), entry.id, references);
+          const validVersion = entry.expectedVersion === 0 ? confirmed.version >= 1 : [entry.expectedVersion, entry.expectedVersion + 1].includes(confirmed.version);
+          if (!validVersion || Boolean(confirmed.deleted) !== !entry.item || entry.item && !equal(confirmed.item, { ...entry.item, tags: normalizeUserTags(entry.item.tags) })) throw fail('network', '关联回执与原请求不一致，原请求保留。');
+        }
+        return result;
+      }
       const { requestId, expectedVersion, item, id } = job;
       const result = await request(item ? `/api/sync/items/${encodeURIComponent(id)}` : `/api/items/${encodeURIComponent(id)}`,
         item ? 'PUT' : 'DELETE', { requestId, expectedVersion, ...(item ? { item } : {}) }, signal);
@@ -44,7 +56,10 @@ export function createSyncApi({ auth, fetcher = globalThis.fetch, issuer = CLOUD
       if (!validVersion || Boolean(result.deleted) !== !item || item && !equal(result.item, { ...item, tags: normalizeUserTags(item.tags) })) throw fail('network', '回执与原请求不一致，本机内容保留，将使用原请求重新核对。');
       return result;
     },
-    async get(id, signal) { return record(await request(`/api/sync/items/${encodeURIComponent(id)}`, 'GET', null, signal), id); },
+    async get(id, signal, allowMissing = false) {
+      try { return record(await request(`/api/sync/items/${encodeURIComponent(id)}`, 'GET', null, signal), id); }
+      catch (error) { if (allowMissing && error.code === 'NOT_FOUND') return { id, deleted: true, missing: true, version: 0 }; throw error; }
+    },
     async changes(since, until, signal) {
       const query = new URLSearchParams({ since, limit: '100', ...(until ? { until } : {}) });
       const page = await request(`/api/changes?${query}`, 'GET', null, signal);

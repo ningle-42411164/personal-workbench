@@ -4,7 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare, createFetchMock } from 'miniflare';
-import { createTodo } from '../../../src/data/workbenchData.js';
+import { createTodo, createNote, convertNote } from '../../../src/data/workbenchData.js';
 
 const base = 'https://workbench.test';
 const cookies = response => response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
@@ -167,6 +167,16 @@ test('本地 workerd：OAuth授权码+PKCE、未认证拦截及真实D1读写完
   assert.deepEqual(await (await call(syncPath, { headers: auth })).json(), { id: offlineTodo.id, version: 3, deleted: true });
   const changes = await (await call('/api/changes?since=0', { headers: auth })).json();
   assert.equal(changes.changes.at(-1).deleted, true);
+  const runtimeNote = createNote('关联事务运行夹具');
+  const linked = convertNote([runtimeNote], runtimeNote.id, 'todo');
+  const batchBody = JSON.stringify({ requestId: 'runtime-linked-batch', entries: linked.map(item => ({ id: item.id, expectedVersion: 0, item })) });
+  const batchResponse = await call('/api/sync/batch', { method: 'POST', headers: auth, body: batchBody });
+  assert.equal(batchResponse.status, 200, await batchResponse.clone().text());
+  const batchResult = await batchResponse.json(); assert.equal(batchResult.records.length, 2);
+  assert.deepEqual(await (await call('/api/sync/batch', { method: 'POST', headers: auth, body: batchBody })).json(), batchResult);
+  const completionTool = await call('/mcp', { method: 'POST', headers: mcpHeaders, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'set_item_completion', arguments: { id: linked[1].id, expectedVersion: 1, requestId: 'runtime-mcp-complete', done: true } } }) });
+  assert.equal(completionTool.status, 200);
+  assert.equal((await completionTool.json()).result.structuredContent.item.done, true);
   const reusedCallback = await call(callbackPath, { headers: { Cookie: cookies(approval) } });
   assert.equal(reusedCallback.status, 400);
   assert.equal((await reusedCallback.json()).diagnostic.category, 'transaction_expired_or_used');

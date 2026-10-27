@@ -57,19 +57,19 @@ test('浏览器保持 online 但 Worker 连接失败/503 时明确显示同步�
   });
 });
 
-test('首次初始化保留原 v2 与正式事项；只在开启后自动纳入新建待办/项目，旧事项需带版本的明确预览确认', async t => {
+test('底层仓库不替代手机授权门控：初始化保留 v2，显式启用后新建分类自动排队，旧记录不隐式覆盖', async t => {
   const formal = createTodo('虚构的既有本机记录', false, at), s = setup(t, [formal]);
   const original = s.storage.getItem(STORAGE_KEY);
   let state = await s.store.read(); assert.deepEqual(state.data.items, [formal]); assert.deepEqual(state.bindings, {});
   await s.store.setEnabled(true);
-  const note = createRoutine('本批不纳入的分类', at); await add(s.store, note);
+  const note = createRoutine('新增日常持续', at); await add(s.store, note);
   const todo = createTodo('开启后新建', true, at); await add(s.store, todo);
   await s.engine.run();
-  assert.deepEqual((await s.service.list({ includeCompleted: true })).items.map(r => r.item.id), [todo.id]);
-  state = await s.store.read(); assert.equal(state.bindings[formal.id], undefined); assert.equal(state.bindings[note.id], undefined);
+  assert.deepEqual(new Set((await s.service.list({ includeCompleted: true })).items.map(r => r.item.id)), new Set([todo.id, note.id]));
+  state = await s.store.read(); assert.equal(state.bindings[formal.id], undefined); assert.equal(state.bindings[note.id].version, 1);
   await assert.rejects(s.store.enroll([formal.id], state.revision - 1), /预览|更新/);
   await s.store.enroll([formal.id], state.revision); await s.engine.run();
-  assert.equal((await s.service.list({ includeCompleted: true })).items.length, 2);
+  assert.equal((await s.service.list({ includeCompleted: true })).items.length, 3);
   assert.equal(s.storage.getItem(STORAGE_KEY), original);
 });
 

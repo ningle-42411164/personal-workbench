@@ -2,7 +2,7 @@ import { STORAGE_KEY, emptyWorkbenchData, validateWorkbenchData, removeItem } fr
 import { isKnownTestRecord } from './knownTestRecords.js';
 import { PHONE_ENROLLMENT_VERSION } from './ownerPhone.js';
 
-import { SYNC_SCOPE_VERSION, syncSupported } from './syncPolicy.js';
+import { SYNC_SCOPE_VERSION, syncSupported, linkedIds } from './syncPolicy.js';
 export { syncSupported } from './syncPolicy.js';
 export const copy = value => JSON.parse(JSON.stringify(value));
 const ordered = value => Array.isArray(value) ? value.map(ordered) : value && typeof value === 'object'
@@ -66,7 +66,7 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
           if (legacy() !== next.legacyRaw) throw new Error('检测到旧版窗口另存了本机数据。已暂停写入；请导出两边备份后核对，避免覆盖。');
           isolateKnownTests(next);
           if ((next.syncScopeVersion ?? 1) < SYNC_SCOPE_VERSION) {
-            next.cursor = '0'; next.syncScopeVersion = SYNC_SCOPE_VERSION;
+            next.cursor = '0'; delete next.pull; next.syncScopeVersion = SYNC_SCOPE_VERSION;
           }
           const previous = copy(next.data);
           // 回调必须同步；网络和授权刷新不得放进这个事务。
@@ -106,7 +106,8 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
         for (const id of Object.keys(state.bindings)) {
           if (state.blocked[id]?.kind === 'rejected' && state.blocked[id].code !== 'REQUEST_ID_REUSED'
             && !equal(previous.items.find(item => item.id === id) ?? null, currentItem(state, id))) {
-            delete state.blocked[id]; delete state.outbox[id];
+            const rejected = state.outbox[id];
+            for (const entry of rejected?.entries ?? [{ id }]) { delete state.blocked[entry.id]; delete state.outbox[entry.id]; }
           }
           dirty(state, id);
         }
@@ -146,12 +147,27 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
         if (!state.enabled) return null;
         for (const id of Object.keys(state.dirty)) {
           if (isKnownTestRecord(id)) continue;
-          // 转换关联在下一批原子同步前暂缓，原随笔和目标均留在本机，不能只发送一半。
-          if (state.data.items.some(item => item.convertedToId && (item.id === id || item.convertedToId === id))) continue;
           if (state.blocked[id]) continue;
           if (state.outbox[id]) return state.outbox[id];
           const item = currentItem(state, id), binding = state.bindings[id];
           if (binding.version === 0 && !item) { delete state.dirty[id]; delete state.bindings[id]; continue; }
+          const ids = linkedIds(id, [...state.data.items, ...Object.values(state.bindings).map(value => value.base)]);
+          if (ids.length > 1) {
+            // 已发出的旧请求先按原内容确认；不能用一次转换替换结果不明的请求。
+            const previousJob = ids.map(key => state.outbox[key]).find(Boolean);
+            if (previousJob && !ids.some(key => state.blocked[key])) return previousJob;
+            if (ids.some(key => isKnownTestRecord(key) || !state.bindings[key] || state.heldLocal?.[key])) {
+              state.blocked[id] = { kind: 'rejected', code: 'LOCAL_REFERENCE', message: '关联目标属于隔离记录或本机保留副本，关联双方保留，暂不上传。' }; continue;
+            }
+            if (ids.some(key => state.blocked[key])) continue;
+            const entries = ids.filter(key => state.bindings[key].version > 0 || currentItem(state, key)).map(key => ({ id: key, expectedVersion: state.bindings[key].version, item: copy(currentItem(state, key)) }));
+            if (entries.length > 32) { state.blocked[id] = { kind: 'rejected', code: 'GROUP_TOO_LARGE', message: '关联组超过一次提交上限，原内容保留。' }; continue; }
+            if (entries.length > 1) {
+              const job = { id, requestId: uuid(), entries };
+              for (const entry of entries) { state.outbox[entry.id] = job; state.dirty[entry.id] = true; }
+              return job;
+            }
+          }
           const job = { id, requestId: uuid(), expectedVersion: binding.version, item: item ? copy(item) : null };
           state.outbox[id] = job; return job;
         }
@@ -162,6 +178,19 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
       return (await transact(state => {
         if (!allowed()) return;
         if (state.outbox[job.id]?.requestId !== job.requestId) return;
+        if (job.entries) {
+          const unchanged = job.entries.every(entry => equal(currentItem(state, entry.id), entry.item));
+          for (const entry of job.entries) {
+            const result = response.records.find(value => (value.item?.id ?? value.id) === entry.id);
+            const desired = currentItem(state, entry.id);
+            state.bindings[entry.id] = { version: result.version, base: result.deleted ? null : result.item, deleted: Boolean(result.deleted) };
+            if (unchanged) putItem(state, result.deleted ? null : result.item, entry.id);
+            delete state.outbox[entry.id]; delete state.blocked[entry.id];
+            if (result.deleted && desired) state.blocked[entry.id] = { kind: 'conflict', message: '关联记录已删除，后续本机修改保留。', remote: result, base: entry.item, group: response.records };
+            dirty(state, entry.id);
+          }
+          return;
+        }
         const desired = currentItem(state, job.id);
         state.bindings[job.id] = { version: response.version, base: response.deleted ? null : response.item, deleted: Boolean(response.deleted) };
         if (equal(desired, job.item)) putItem(state, response.deleted ? null : response.item, job.id);
@@ -174,26 +203,45 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
       return (await transact(state => {
         if (!allowed()) return;
         if (state.outbox[job.id]?.requestId !== job.requestId) return;
-        state.blocked[job.id] = { kind: error.kind ?? 'rejected', code: error.code ?? '', message: error.message, remote, base: state.bindings[job.id].base };
+        const entries = remote?.records ? remote.records.map(value => ({ id: value.item?.id ?? value.id })) : job.entries ?? [job];
+        for (const entry of entries) state.blocked[entry.id] = { kind: error.kind ?? 'rejected', code: error.code ?? '', message: error.message,
+          remote: remote?.records ? remote.records.find(value => (value.item?.id ?? value.id) === entry.id) : remote,
+          ...(remote?.records ? { group: remote.records } : {}), base: state.bindings[entry.id]?.base ?? null };
       })).state;
     },
     async applyChanges(page, from, allowed = () => true) {
       return (await transact(state => {
         if (!allowed() || !state.enabled || state.cursor !== from) return false;
-        for (const change of page.changes) {
-          const id = change.id, binding = state.bindings[id];
-          if (isKnownTestRecord(id)) continue;
-          if (!binding && (!change.record || !syncSupported(change.record.item))) continue;
-          if (binding && change.version <= binding.version) continue;
-          if (state.dirty[id] || state.outbox[id]) continue; // 本机未确认的修改不能被拉取覆盖；重放后再决定冲突。
-          if (!binding && currentItem(state, id)) {
-            state.blocked[id] = { kind: 'collision', message: '本机与云端存在相同 ID，保留双方，未自动纳入。', remote: change.deleted ? change : change.record, base: null };
-            continue;
+        // 分页仅暂存；收齐同一高水位后一起应用，跨页转换不会产生短暂断链。
+        if (state.pull && state.pull.until !== page.until) return false;
+        const staged = state.pull ?? { until: page.until, changes: {} };
+        for (const change of page.changes) staged.changes[change.id] = change;
+        state.cursor = page.cursor;
+        if (page.hasMore) { state.pull = staged; return true; }
+        const changes = Object.values(staged.changes);
+        const graph = [...state.data.items, ...Object.values(state.bindings).map(value => value.base), ...changes.map(value => value.record?.item)];
+        const skipped = new Set();
+        for (const change of changes) {
+          const ids = linkedIds(change.id, graph);
+          if (ids.some(id => state.dirty[id] || state.outbox[id] || state.blocked[id])) ids.forEach(id => skipped.add(id));
+          if (ids.some(id => !state.bindings[id] && currentItem(state, id))) {
+            ids.forEach(id => skipped.add(id));
+            const group = ids.map(id => { const remote = staged.changes[id]; return remote ? remote.deleted ? remote : remote.record : state.bindings[id]?.base ? { item: state.bindings[id].base, version: state.bindings[id].version } : { id, deleted: true, missing: true, version: 0 }; });
+            for (const remote of group) {
+              const id = remote.item?.id ?? remote.id;
+              if (currentItem(state, id) && !state.bindings[id]) state.blocked[id] = { kind: 'collision', message: '本机与云端存在相同 ID，关联双方保留。', remote, group, base: null };
+            }
           }
+        }
+        for (const change of changes) {
+          const id = change.id, binding = state.bindings[id];
+          if (isKnownTestRecord(id) || skipped.has(id)) continue;
+          if (!change.deleted && !syncSupported(change.record.item)) continue;
+          if (binding && change.version <= binding.version) continue;
           state.bindings[id] = { version: change.version, base: change.deleted ? null : change.record.item, deleted: change.deleted };
           putItem(state, change.deleted ? null : change.record.item, id);
         }
-        state.cursor = page.cursor;
+        delete state.pull;
         return true;
       })).result;
     },
@@ -202,6 +250,25 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
         expected(state, revision);
         const conflict = state.blocked[id];
         if (!conflict?.remote) throw new Error('尚未取得云端版本，请恢复连接后重新核对。');
+        if (conflict.group) {
+          const ids = conflict.group.map(value => value.item?.id ?? value.id), copies = new Map();
+          for (const key of ids) if (currentItem(state, key)) copies.set(key, uuid());
+          for (const [key, copyId] of copies) {
+            const local = copy(currentItem(state, key));
+            state.archive.push({ id: key, local, ...(state.blocked[key] ?? conflict) });
+            if (copies.has(local.convertedToId)) local.convertedToId = copies.get(local.convertedToId);
+            state.data.items.push({ ...local, id: copyId, title: `${local.title.slice(0, 140)}（冲突副本）` });
+            state.heldLocal ??= {}; state.heldLocal[copyId] = { reason: 'conflict-copy', originalId: key };
+          }
+          for (const remote of conflict.group) {
+            const key = remote.item?.id ?? remote.id;
+            putItem(state, remote.deleted ? null : remote.item, key);
+            if (remote.missing) delete state.bindings[key];
+            else state.bindings[key] = { version: remote.version, base: remote.deleted ? null : remote.item, deleted: Boolean(remote.deleted) };
+            delete state.blocked[key]; delete state.outbox[key]; delete state.dirty[key];
+          }
+          return;
+        }
         const local = currentItem(state, id);
         state.archive.push({ id, local, ...conflict });
         // 冲突副本保留在本机，不参加首次/重复自动纳入；不会用旧版本自动覆盖云端。

@@ -1,6 +1,7 @@
 // 每次网络发送使用已经落盘的不可变请求；响应丢失、刷新或另一个窗口重试均复用它。
 // 定时器只负责页面打开时的同步，不承诺手机关闭应用后仍在后台联网。
 import { equal } from './syncStore.js';
+import { linkedIds } from './syncPolicy.js';
 
 export function createSyncEngine({ store, api, beforeRun = () => store.read(), isOnline = () => globalThis.navigator?.onLine !== false, onStatus = () => {}, now = Date.now, schedule = setTimeout, cancel = clearTimeout } = {}) {
   let running, timer, stopped = false, failures = 0, generation = 0, request;
@@ -31,18 +32,32 @@ export function createSyncEngine({ store, api, beforeRun = () => store.read(), i
           } catch (error) {
             if (!active()) return;
             if (error.kind === 'conflict') {
+              if (job.entries) {
+                const records = [];
+                for (const entry of job.entries) records.push(await api.get(entry.id, signal, true));
+                if (active()) await store.block(job, error, { records }, active);
+                continue;
+              }
               const remote = await api.get(job.id, signal);
               if (active()) {
                 // 同 ID 同内容已经在云端时仅接续绑定；不同内容/删除标记仍保留双方，绝不覆盖。
                 if (error.code === 'ITEM_ID_EXISTS' && job.expectedVersion === 0 && !remote.deleted && equal(job.item, remote.item)) await store.acknowledge(job, remote, active);
-                else await store.block(job, error, remote, active);
+                else {
+                  const local = await store.read();
+                  const ids = linkedIds(job.id, [...local.data.items, ...Object.values(local.bindings).map(value => value.base), remote.item]);
+                  if (ids.length > 1) {
+                    const records = [];
+                    for (const id of ids) records.push(id === job.id ? remote : await api.get(id, signal, true));
+                    await store.block(job, error, { records }, active);
+                  } else await store.block(job, error, remote, active);
+                }
               }
             } else if (error.kind === 'rejected') await store.block(job, error, null, active);
             else throw error;
           }
         }
         state = await store.read();
-        let from = state.cursor, until;
+        let from = state.cursor, until = state.pull?.until;
         for (let count = 0; count < 1000 && active(); count++) {
           const page = await api.changes(from, until, signal);
           if (!active()) return;

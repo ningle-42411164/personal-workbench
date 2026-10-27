@@ -60,7 +60,7 @@ test('真实MCP SDK客户端完成初始化、工具发现、创建、查询和�
   const client = new Client({ name: 'integration-test', version: '1.0.0' });
   await client.connect(transport); t.after(() => client.close());
   const { tools } = await client.listTools();
-  assert.deepEqual(tools.map(tool => tool.name), ['list_items', 'get_project', 'create_item', 'update_project', 'ping']);
+  assert.deepEqual(tools.map(tool => tool.name), ['list_items', 'get_project', 'create_item', 'update_project', 'get_item', 'update_item', 'set_item_completion', 'delete_item', 'convert_note', 'ping']);
   assert.ok(tools.filter(tool => tool.name !== 'ping').every(tool => tool.outputSchema?.type === 'object'));
   const ping = tools.find(tool => tool.name === 'ping');
   assert.equal(Object.hasOwn(ping, 'outputSchema'), false);
@@ -94,6 +94,14 @@ test('MCP只读令牌调用写工具返回权限错误，不执行写入', async
   const denied = await client.callTool({ name: 'create_item', arguments: { requestId: 'mcp-denied-1', type: 'todo', title: '拒绝' } });
   assert.equal(denied.isError, true);
   assert.match(denied._meta['mcp/www_authenticate'][0], /insufficient_scope/);
+  const id = crypto.randomUUID(), shared = { id, expectedVersion: 1, requestId: 'denied-new-tool' };
+  for (const [name, args] of [
+    ['update_item', { ...shared, fields: { title: '不应写入' } }],
+    ['set_item_completion', { ...shared, done: true }], ['delete_item', shared], ['convert_note', { ...shared, targetType: 'todo' }],
+  ]) {
+    const failure = await client.callTool({ name, arguments: args }); assert.equal(failure.isError, true);
+    assert.match(failure._meta['mcp/www_authenticate'][0], /insufficient_scope/);
+  }
   assert.equal((await service.list({})).items.length, 0);
 });
 
@@ -110,4 +118,39 @@ test('授权页元数据经过转义，未使用S256的请求被拒绝', async (
   const env = { PUBLIC_BASE_URL: base, OAUTH_PROVIDER: { parseAuthRequest: async () => ({ codeChallengeMethod: 'plain', codeChallenge: 'x' }) } };
   await assert.rejects(handleAuthorization(new Request(`${base}/authorize`), env), { code: 'PKCE_REQUIRED' });
   await assert.rejects(handleAuthorization(new Request(`${base}/authorize/decision`, { method: 'POST', headers: { Origin: 'https://evil.test' } }), env), { code: 'ORIGIN_REJECTED' });
+});
+
+
+test('MCP 工具真实调用：八类读取创建，普通修改、明确完成恢复、单条删除及转换原子重试', async t => {
+  const service = setup(t), client = new Client({ name: 'category-mcp-test', version: '1.0.0' });
+  await client.connect(new StreamableHTTPClientTransport(new URL(base + '/mcp'), { fetch: (url, init) => handleApi(new Request(url, init), service, base) }));
+  t.after(() => client.close());
+  const call = async (name, args) => { const r = await client.callTool({ name, arguments: args }); assert.notEqual(r.isError, true, JSON.stringify(r)); assert.deepEqual(JSON.parse(r.content[0].text), r.structuredContent); return r.structuredContent; };
+  for (const type of ['todo','note','routine','importantDate','project','waiting','shopping','creation']) {
+    const created = await call('create_item', { type, title: 'MCP分类夹具', requestId: 'mcp-all-' + type, ...(type === 'importantDate' ? { targetDate: '2027-01-01' } : {}) });
+    const id = created.item.id;
+    assert.equal((await call('list_items', { type, includeCompleted: true })).items[0].item.id, id);
+    assert.equal((await call('get_item', { id })).version, 1);
+    let current = await call('update_item', { id, expectedVersion: 1, requestId: 'mcp-edit-' + type, fields: { title: '修改后' } });
+    if (['todo','note','waiting','shopping','creation'].includes(type)) {
+      const args = { id, expectedVersion: current.version, requestId: 'mcp-done-' + type, done: true };
+      current = await call('set_item_completion', args); assert.equal(current.item.done, true);
+      assert.deepEqual(await call('set_item_completion', args), current);
+      const stale = await client.callTool({ name: 'set_item_completion', arguments: { ...args, requestId: 'mcp-stale-' + type, done: false } }); assert.equal(stale.isError, true);
+      current = await call('set_item_completion', { ...args, requestId: 'mcp-restore-' + type, expectedVersion: current.version, done: false }); assert.equal(current.item.completedAt, null);
+    } else {
+      const invalid = await client.callTool({ name: 'set_item_completion', arguments: { id, expectedVersion: current.version, requestId: 'mcp-no-done-' + type, done: true } }); assert.equal(invalid.isError, true);
+    }
+    if (type === 'note') {
+      const args = { id, expectedVersion: current.version, requestId: 'mcp-convert-note', targetType: 'todo' };
+      const converted = await call('convert_note', args); assert.deepEqual(await call('convert_note', args), converted);
+      const target = converted.records.find(r => r.item.id !== id);
+      assert.equal((await call('get_item', { id })).item.convertedToId, target.item.id);
+      await call('delete_item', { id: target.item.id, expectedVersion: target.version, requestId: 'mcp-delete-target' });
+      current = await call('get_item', { id }); assert.equal(current.item.convertedToId, undefined);
+    }
+    const args = { id, expectedVersion: current.version, requestId: 'mcp-delete-' + type };
+    const deleted = await call('delete_item', args); assert.equal(deleted.deleted, true); assert.deepEqual(await call('delete_item', args), deleted);
+  }
+  assert.equal((await service.list({ includeCompleted: true })).items.length, 0);
 });

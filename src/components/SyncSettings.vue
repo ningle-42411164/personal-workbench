@@ -13,15 +13,16 @@ const heldCopies = computed(() => props.snapshot?.data.items.filter(item => prop
 <template>
   <section class="panel sync-settings" aria-label="自动同步设置">
     <h2>自动同步 <small>{{ NODE_ONE_VERSION }}</small></h2>
-    <p>待办、项目、随笔、等待中、购物及娱乐创作在原首页保存并自动同步。日常持续、重要日和随笔转换关联暂留本机，日常无需上传按钮。</p>
-    <p v-if="ownerPhone && !snapshot?.nodeOne">此手机更新后会自动纳入支持的分类，复用有效读写连接，无需逐项勾选。</p>
+    <p>所有者连接后，八类事项在原首页保存并自动同步；随笔转换保留原文并一起同步关联，日常无需上传按钮。</p>
+    <p v-if="!connection.auth.remembered && connection.auth.state !== 'connected' && !snapshot?.nodeOne">当前为本机使用，无需登录；云端仅供工作台所有者连接。</p>
+    <p v-else-if="ownerPhone && !snapshot?.nodeOne">此手机更新后会自动纳入支持的分类，复用有效读写连接，无需逐项勾选。</p>
     <p v-else-if="ownerPhone">已从此手机自动纳入 {{ snapshot?.nodeOne?.enrolledIds.length || 0 }} 项，已有绑定继续复用。</p>
     <p v-else>此设备不执行首次纳入，本机未绑定记录不会自动上传；首次来源只取正式页面上的手机数据。</p>
-    <p role="status">{{ status.message }}<template v-if="snapshot"> · 待同步 {{ pending }} 项 · 待核对 {{ conflicts.length }} 项</template></p>
+    <p v-if="snapshot?.nodeOne || snapshot?.enabled || connection.auth.remembered" role="status">{{ status.message }}<template v-if="snapshot"> · 待同步 {{ pending }} 项 · 待核对 {{ conflicts.length }} 项</template></p>
     <button v-if="snapshot?.enabled" type="button" class="secondary" @click="emit('enabled', false)">暂停自动同步</button>
     <button v-else-if="snapshot?.nodeOne" type="button" :disabled="!connection.auth.canWrite" @click="emit('enabled', true)">恢复自动同步</button>
-    <button v-else-if="snapshot && !ownerPhone" type="button" :disabled="connection.auth.state !== 'connected'" @click="emit('enabled', true)">启用已绑定事项同步</button>
-    <p v-if="!connection.auth.canWrite">正在等待有效读写连接；已保存的连接会自动恢复。本机无需登录，连接失效时可在上方处理，事项和待同步修改不会清除。</p>
+    <button v-else-if="snapshot && !ownerPhone && connection.auth.state === 'connected'" type="button" @click="emit('enabled', true)">启用已绑定事项同步</button>
+    <p v-if="!connection.auth.canWrite && (connection.auth.remembered || snapshot?.nodeOne)">正在等待有效读写连接；已保存的连接会自动恢复。本机无需登录，连接失效时可在上方处理，事项和待同步修改不会清除。</p>
     <p v-if="status.lastSuccess">最后完成同步：{{ new Date(status.lastSuccess).toLocaleString() }}</p>
     <article v-for="conflict in conflicts" :key="conflict.id" class="import-confirm">
       <h3>{{ conflict.local?.title || conflict.remote?.item?.title || '已在本机删除的事项' }}</h3>

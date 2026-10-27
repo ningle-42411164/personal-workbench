@@ -405,7 +405,7 @@ async function confirmImport() {
     </div>
     <header><span class="eyebrow">Personal Workbench</span><h1>欢迎回来，从哪里开始干活？</h1></header>
     <div v-if="needRefresh" class="notice">有新版本可用。<button @click="updateServiceWorker()">更新应用</button></div>
-    <!-- 原首页继续使用同一个 v2 集合；待办、项目由本机事务队列自动同步，其他分类继续本机保存。 -->
+    <!-- 原首页继续使用同一个 v2 集合；所有者连接后八类事项由事务队列同步，未连接访客只保存本机。 -->
     <section class="routine-strip" aria-label="日常持续">
       <div class="routine-strip-head">
         <div class="routine-chips">

@@ -17,6 +17,58 @@ export class D1Store {
       .bind(this.ownerId, id).first());
   }
   async deleted(id) { return this.db.prepare('SELECT version, deleted_at FROM deleted_items WHERE owner_id = ? AND item_id = ?').bind(this.ownerId, id).first(); }
+  async references(id) {
+    const { results } = await this.db.prepare("SELECT item_json, version FROM workbench_items WHERE owner_id = ? AND json_extract(item_json, '$.convertedToId') = ?").bind(this.ownerId, id).all();
+    return results.map(unpack);
+  }
+  async batchStates(ids) {
+    const slots = ids.map(() => '?').join(',');
+    const { results } = await this.db.prepare(`SELECT item_json, version FROM workbench_items WHERE owner_id = ? AND item_id IN (${slots})`).bind(this.ownerId, ...ids).all();
+    const deleted = await this.db.prepare(`SELECT item_id FROM deleted_items WHERE owner_id = ? AND item_id IN (${slots})`).bind(this.ownerId, ...ids).all();
+    return { current: new Map(results.map(row => { const record = unpack(row); return [record.item.id, record]; })), deleted: new Set(deleted.results.map(row => row.item_id)) };
+  }
+  async syncBatch(requestId, hash, entries) {
+    const replay = await this.receipt(requestId, hash);
+    if (replay) return replay;
+    const response = { records: entries.map(({ id, current, item }) => item
+      ? { item, version: current ? current.version + (item === current.item ? 0 : 1) : 1 }
+      : { id, deleted: true, version: current.version + 1 }) };
+    // 固定参数数目，不把 32 条版本/删除依赖展开成上百个绑定参数。
+    const expected = JSON.stringify(entries.map(({ id, current, item }) => ({ id, version: current?.version ?? 0, deleted: !item })));
+    const guard = `NOT EXISTS(SELECT 1 FROM json_each(?) e
+      LEFT JOIN workbench_items i ON i.owner_id = ? AND i.item_id = json_extract(e.value, '$.id')
+      LEFT JOIN deleted_items d ON d.owner_id = ? AND d.item_id = json_extract(e.value, '$.id')
+      WHERE CASE WHEN json_extract(e.value, '$.version') = 0 THEN i.item_id IS NOT NULL OR d.item_id IS NOT NULL
+      ELSE i.version IS NULL OR i.version <> json_extract(e.value, '$.version') END)
+      AND NOT EXISTS(SELECT 1 FROM workbench_items n JOIN json_each(?) e ON json_extract(n.item_json, '$.convertedToId') = json_extract(e.value, '$.id')
+      WHERE n.owner_id = ? AND json_extract(e.value, '$.deleted') = 1 AND n.item_id NOT IN (SELECT json_extract(value, '$.id') FROM json_each(?)))`;
+    const at = new Date().toISOString();
+    // 回执准入与所有写入在同一个事务；任一版本不匹配时整组零写入，SQL 失败则全部回滚。
+    const statements = [this.db.prepare(`INSERT INTO mutation_receipts(owner_id, request_id, fingerprint, response_json, created_at)
+      SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS(SELECT 1 FROM mutation_receipts WHERE owner_id = ? AND request_id = ?) AND ${guard}`)
+      .bind(this.ownerId, requestId, hash, JSON.stringify(response), at, this.ownerId, requestId, expected, this.ownerId, this.ownerId, expected, this.ownerId, expected)];
+    const gate = 'EXISTS(SELECT 1 FROM mutation_receipts WHERE owner_id = ? AND request_id = ? AND fingerprint = ?)';
+    const gateArgs = [this.ownerId, requestId, hash];
+    entries.forEach(({ id, current, item }, index) => {
+      const result = response.records[index];
+      if (item && current) statements.push(this.db.prepare(`UPDATE workbench_items SET item_json = ?, version = ? WHERE owner_id = ? AND item_id = ? AND version = ? AND ${gate}`)
+        .bind(JSON.stringify(item), result.version, this.ownerId, id, current.version, ...gateArgs));
+      else if (item) statements.push(this.db.prepare(`INSERT OR IGNORE INTO workbench_items(owner_id, item_id, item_json, version)
+        SELECT ?, ?, ?, 1 WHERE ${gate} AND NOT EXISTS(SELECT 1 FROM deleted_items WHERE owner_id = ? AND item_id = ?)`)
+        .bind(this.ownerId, id, JSON.stringify(item), ...gateArgs, this.ownerId, id));
+      else {
+        statements.push(this.db.prepare(`INSERT OR IGNORE INTO deleted_items(owner_id, item_id, version, deleted_at) SELECT ?, ?, ?, ? WHERE ${gate}`)
+          .bind(this.ownerId, id, result.version, at, ...gateArgs));
+        statements.push(this.db.prepare(`DELETE FROM workbench_items WHERE owner_id = ? AND item_id = ? AND version = ? AND ${gate}`).bind(this.ownerId, id, current.version, ...gateArgs));
+      }
+      if (!current || result.version !== current.version) statements.push(this.db.prepare(`INSERT OR IGNORE INTO item_changes(owner_id, item_id, version, deleted, record_json, changed_at)
+        SELECT ?, ?, ?, ?, ?, ? WHERE ${gate}`).bind(this.ownerId, id, result.version, item ? 0 : 1, item ? JSON.stringify(result) : null, at, ...gateArgs));
+    });
+    await this.db.batch(statements);
+    const committed = await this.receipt(requestId, hash);
+    if (!committed) throw new ApiError(409, 'VERSION_CONFLICT', '关联记录发生并发变化，整个批次未提交。');
+    return committed;
+  }
   changeStatement(response, changed = true) {
     return this.db.prepare(`INSERT OR IGNORE INTO item_changes(owner_id, item_id, version, deleted, record_json, changed_at)
       SELECT ?, ?, ?, ?, ?, ? WHERE changes() = 1 AND ? = 1`)

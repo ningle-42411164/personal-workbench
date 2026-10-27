@@ -25,20 +25,25 @@ export const createSchema = z.object({
   fields: projectFieldsSchema.omit({ title: true, tags: true }).optional(),
 }).strict();
 const versioned = { requestId, id: z.string().uuid(), expectedVersion: z.number().int().positive() };
+export const convertSchema = z.object({ ...versioned, targetType: z.enum(['todo', 'project', 'importantDate', 'waiting', 'shopping', 'creation']), targetDate: date.optional() }).strict();
 // 同步复用本机 v2 记录，保留离线操作时间和已有项目历史；不是导入任意 JSON 的入口。
 const timestamp = z.string().datetime();
 const snapshotBase = { id: z.string().uuid(), title, tags, createdAt: timestamp, updatedAt: timestamp, priority: z.boolean().optional() };
 export const syncSchema = z.object({ requestId, id: z.string().uuid(), expectedVersion: z.number().int().min(0), item: z.discriminatedUnion('type', [
-  ...['note', 'waiting', 'shopping', 'creation'].map(type => z.object({ ...snapshotBase, type: z.literal(type), done: z.boolean().optional(), completedAt: timestamp.nullable().optional() }).strict()),
+  ...['waiting', 'shopping', 'creation'].map(type => z.object({ ...snapshotBase, type: z.literal(type), done: z.boolean().optional(), completedAt: timestamp.nullable().optional() }).strict()),
+  z.object({ ...snapshotBase, type: z.literal('note'), done: z.boolean().optional(), completedAt: timestamp.nullable().optional(), convertedToId: z.string().uuid().optional(), convertedToType: z.enum(['todo', 'project', 'importantDate', 'waiting', 'shopping', 'creation']).optional(), convertedAt: timestamp.optional() }).strict(),
+  z.object({ ...snapshotBase, type: z.literal('routine') }).strict(),
+  z.object({ ...snapshotBase, type: z.literal('importantDate'), targetDate: date }).strict(),
   z.object({ ...snapshotBase, type: z.literal('todo'), urgent: z.boolean(), done: z.boolean(), completedAt: timestamp.nullable() }).strict(),
   z.object({ ...snapshotBase, type: z.literal('project'), status: z.enum(['active', 'paused', 'done']).nullable().optional(), startDate: date.nullable().optional(), dueDate: date.nullable().optional(), currentSituation: z.string().max(10000).optional(), nextStep: z.string().max(10000).optional(), completedAt: timestamp.nullable().optional(), updates: z.array(z.object({ id: z.string().min(1), content: z.string().max(10000), createdAt: timestamp }).strict()).optional() }).strict(),
 ]) }).strict();
+export const syncBatchSchema = z.object({ requestId, entries: z.array(z.object({ id: z.string().uuid(), expectedVersion: z.number().int().min(0), item: syncSchema.shape.item.nullable() }).strict()).min(2).max(32) }).strict();
 
-export function syncItem(input, previous) {
+export function syncItem(input, previous, references = []) {
   const item = { ...input.item, tags: cleanTags(input.item.tags) };
   if (item.id !== input.id || item.type !== 'project' && !item.title.trim()) throw new ApiError(400, 'INVALID_INPUT', '同步事项内容无效。');
   if (previous && (item.type !== previous.type || item.createdAt !== previous.createdAt)) throw new ApiError(400, 'IMMUTABLE_FIELD', '同步不能改变原记录的分类或创建时间。');
-  validateWorkbenchData({ schemaVersion: 2, items: [item] });
+  validateWorkbenchData({ schemaVersion: 2, items: [item, ...references.filter(value => value.id !== item.id)] });
   return previous && JSON.stringify(canonical(previous)) === JSON.stringify(canonical(item)) ? previous : item;
 }
 export const itemPatchSchema = z.object({ ...versioned, fields: z.object({

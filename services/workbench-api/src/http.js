@@ -30,6 +30,8 @@ export async function readJson(request) {
 export async function handleApi(request, service, baseUrl) {
   try {
     const url = new URL(request.url);
+    if (url.pathname === '/api/notes/convert' && request.method === 'POST') return json(await service.convertNote(await readJson(request)));
+    if (url.pathname === '/api/sync/batch' && request.method === 'POST') return json(await service.syncBatch(await readJson(request)));
     const syncMatch = /^\/api\/sync\/items\/([^/]+)$/.exec(url.pathname);
     if (syncMatch && request.method === 'GET') return json(await service.syncState({ id: syncMatch[1] }));
     if (syncMatch && request.method === 'PUT') {

@@ -3,6 +3,8 @@
 本目录是独立的 Cloudflare Worker 服务，提供受 OAuth 保护的 MCP 与网页 REST API。
 不调用任何模型 API，不需要购买模型 API Key。网页接入与学习索引见仓库 `docs/` 的阶段记录。
 
+**最新状态（2026-10-27，2026.10.27.1）：八类事项同步与随笔关联批次已实现；MCP 补齐普通修改、明确完成/恢复、单条删除、单条读取和转换。节点一已由所有者手机验收；新增能力的隔离 SDK/workerd 验证与真实手机/ChatGPT 验收分开记录。** 以 [剩余分类同步记录](../../docs/category-sync-2026-10-26.md) 为准，下方节点一描述是历史基线。
+
 **状态（2026-10-26，节点一）：已实现手机更新后自动纳入现有待办/项目、原首页自动补传和拉取，复用有效读写授权；首次正式纳入仅从手机执行，不从电脑上传。真实手机更新后的首次纳入待验收。已有手机↔GPT 手动闭环及最小 ping/list_items 正常显示证据，不能代替本节点验收。** 最新实现、验证层级与学习索引见 [节点一记录](../../docs/node-one-2026-10-26.md)。
 
 实际地址、验证证据、修改说明和后续限制见 [部署记录](DEPLOYMENT-2026-10-26.md)。
@@ -16,12 +18,17 @@
 | `create_item` | `POST /api/items` | `workbench:write` |
 | `update_project` | `PATCH /api/projects/:id` | `workbench:read` 和 `workbench:write` |
 | `ping`（判别实验） | 无事项 REST 对应，只返回固定纯文本 | `workbench:read` |
+| `get_item` | `GET /api/items/:id` | `workbench:read` |
+| `update_item` | `PATCH /api/items/:id` | `workbench:read` 和 `workbench:write` |
+| `set_item_completion` | `POST /api/items/:id/completion`，明确 done=true/false | 同上 |
+| `delete_item` | `DELETE /api/items/:id` | 同上 |
+| `convert_note` | `POST /api/notes/convert`，保留原随笔与关联目标原子提交 | 同上 |
 
 - 新建支持现有八种类型；项目更新复用 `src/data/workbenchData.js` 的规则与历史逻辑。
-- MCP 没有删除、整库替换、任意 SQL、任意脚本或文件操作工具。
+- MCP 仅支持经确认的单条删除，没有整库替换、任意 SQL、任意脚本或文件操作工具。新增工具需要刷新目录，OAuth scope 保持原 read/write。
 - 新网页同步接口：`GET /api/items/:id`、`PATCH /api/items/:id`、`POST /api/items/:id/completion`、`DELETE /api/items/:id`；均要求版本与幂等标识，写入另需 write scope。
-- `GET /api/changes` 返回固定高水位的增量分页及删除标记。`GET /api/sync/items/:id` 返回当前记录或删除标记，`PUT` 仅接受严格校验的待办/项目 v2 快照，保留离线时间与现有历史。新建 expectedVersion=0；更新必须匹配当前版本，分类与创建时间不可改变。
-- 网页使用 IndexedDB 事务队列；所有者已明确授权手机现有待办/项目自动纳入，不再逐项预览确认。桌面和隔离页不作为首次纳入来源；冲突保留双方。
+- `GET /api/changes` 返回固定高水位的增量分页及删除标记。`GET /api/sync/items/:id` 返回当前记录或删除标记，`PUT` 接受严格校验的八类 v2 快照；关联随笔必须通过 `POST /api/sync/batch` 与目标一起提交。保留离线时间与现有历史，首次 expectedVersion=0，更新必须匹配当前版本，分类与创建时间不可改变。
+- 网页使用 IndexedDB 事务队列；所有者已明确授权手机八类事项自动纳入，不再逐项预览确认。桌面和隔离页不作为首次纳入来源；冲突保留双方，未授权访客保持纯本机功能。
 - 默认 `list_items`、事项列表和增量 changes 排除共享精确表中的四个虚构测试 ID，按 ID 查询及原数据库记录保留；不按标题判断或批量删除。网页原首页使用同一隔离表。
 - 正式事项 JSON 继续使用现有 v2 字段；服务端单独维护版本号和去重回执，不写回浏览器。
 - 沿用所有者已授权的 Cloudflare Free 资源；资源名称保留 test 后缀，不表示只存虚构数据。非法旧数据或超限请求保留并提示，不擅自删减或覆盖。

@@ -1,5 +1,7 @@
 import { createSchema, updateSchema, listSchema, getProjectSchema, makeItem, patchProject, fingerprint, itemPatchSchema, completionSchema, deleteSchema, changesSchema, patchItem, setCompletion, syncSchema, syncItem } from './domain.js';
 import { ApiError } from './errors.js';
+import { syncBatchSchema, convertSchema } from './domain.js';
+import { convertNote } from '../../../src/data/workbenchData.js';
 
 export const READ_SCOPE = 'workbench:read';
 export const WRITE_SCOPE = 'workbench:write';
@@ -45,6 +47,7 @@ export class WorkbenchService {
   async sync(input) {
     this.require(READ_SCOPE); this.require(WRITE_SCOPE);
     const parsed = syncSchema.parse(input);
+    if (parsed.item.convertedToId) throw new ApiError(400, 'BATCH_REQUIRED', '转换关联必须一起同步，原内容保留。');
     const hash = await fingerprint('sync_item', parsed);
     const replay = await this.store.receipt(parsed.requestId, hash);
     if (replay) return replay;
@@ -52,6 +55,43 @@ export class WorkbenchService {
     const current = await this.getItem({ id: parsed.id });
     if (current.version !== parsed.expectedVersion) throw new ApiError(409, 'VERSION_CONFLICT', '记录已变化，本机修改保留待比较。');
     return this.store.update(parsed.requestId, hash, current, syncItem(parsed, current.item));
+  }
+  async syncBatch(input) {
+    this.require(READ_SCOPE); this.require(WRITE_SCOPE);
+    const parsed = syncBatchSchema.parse(input);
+    if (new Set(parsed.entries.map(entry => entry.id)).size !== parsed.entries.length) throw new ApiError(400, 'INVALID_INPUT', '批次 ID 重复。');
+    const hash = await fingerprint('sync_batch', parsed), replay = await this.store.receipt(parsed.requestId, hash);
+    if (replay) return replay;
+    const entries = [];
+    const references = parsed.entries.flatMap(entry => entry.item ? [entry.item] : []);
+    const states = await this.store.batchStates(parsed.entries.map(entry => entry.id));
+    for (const entry of parsed.entries) {
+      const current = states.current.get(entry.id), deleted = states.deleted.has(entry.id);
+      if (deleted || !entry.item && !current) throw new ApiError(409, 'VERSION_CONFLICT', '关联记录已删除或不存在，双方内容保留。');
+      const item = entry.item ? syncItem(entry, current?.item, references) : null;
+      // 手机首次纳入时允许接续完全相同的既有记录；不同内容仍产生冲突。
+      const same = current && item === current.item;
+      if (entry.expectedVersion !== (current?.version ?? 0) && !(entry.expectedVersion === 0 && same)) throw new ApiError(409, 'VERSION_CONFLICT', '关联记录版本已变化，整个批次未提交。');
+      if (!item) {
+        const linked = await this.store.references(entry.id);
+        if (linked.some(record => !parsed.entries.some(value => value.id === record.item.id && (!value.item || value.item.convertedToId !== entry.id)))) throw new ApiError(409, 'VERSION_CONFLICT', '仍有关联随笔，请保留修改并重新读取。');
+      }
+      entries.push({ id: entry.id, current, item });
+    }
+    return this.store.syncBatch(parsed.requestId, hash, entries);
+  }
+  async convertNote(input) {
+    this.require(READ_SCOPE); this.require(WRITE_SCOPE);
+    const parsed = convertSchema.parse(input), hash = await fingerprint('convert_note', parsed);
+    const replay = await this.store.receipt(parsed.requestId, hash);
+    if (replay) return replay;
+    const current = await this.getItem({ id: parsed.id });
+    if (current.version !== parsed.expectedVersion) throw new ApiError(409, 'VERSION_CONFLICT', '随笔已变化，转换未执行。');
+    if (current.item.type !== 'note' || current.item.convertedToId) throw new ApiError(400, 'INVALID_INPUT', '只有尚未转换的随笔可以转换。');
+    if (parsed.targetDate && parsed.targetType !== 'importantDate') throw new ApiError(400, 'INVALID_INPUT', '只有重要日需要目标日期。');
+    if (parsed.targetType === 'importantDate' && !parsed.targetDate) throw new ApiError(400, 'INVALID_INPUT', '重要日需要目标日期。');
+    const items = convertNote([current.item], parsed.id, parsed.targetType, parsed.targetDate);
+    return this.store.syncBatch(parsed.requestId, hash, items.map(item => ({ id: item.id, current: item.id === parsed.id ? current : null, item })));
   }
   async mutate(operation, parsed, change) {
     this.require(READ_SCOPE); this.require(WRITE_SCOPE);
