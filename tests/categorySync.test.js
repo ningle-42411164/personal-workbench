@@ -11,6 +11,7 @@ import { D1Store } from '../services/workbench-api/src/store.js';
 import { sqliteD1 } from '../services/workbench-api/test/sqlite-d1.js';
 import { handleApi } from '../services/workbench-api/src/http.js';
 import { fixtureMcpClient } from '../services/workbench-api/test/mcp-fixture.js';
+import { resolveConflict } from '../src/sync/resolveConflict.js';
 
 export const at = '2026-10-26T12:00:00.000Z';
 export const data = items => ({ schemaVersion: 2, items });
@@ -34,6 +35,109 @@ export function fixture(t, items = []) {
   return { store, db, service, api, engine, controls, indexedDB };
 }
 export async function save(s, change) { const state = await s.store.read(); return s.store.save(data(change(state.data.items)), state.revision); }
+
+async function makeConflict(t, linked = false) {
+  const note = createNote('共同版本', at);
+  const items = linked ? convertNote([note], note.id, 'shopping') : [note];
+  const s = fixture(t, items); await s.engine.run();
+  await save(s, values => values.map(value => renameItem(value, '本机选择内容')));
+  await s.service.patchItem({ id: note.id, expectedVersion: 1, requestId: 'conflict-remote-setup', fields: { title: '云端选择内容' } });
+  await s.engine.run(); return { ...s, id: note.id };
+}
+async function choose(s, choice, api = s.api) {
+  return resolveConflict({ store: s.store, api, id: s.id, choice, revision: (await s.store.read()).revision });
+}
+
+for (const linked of [false, true]) test(`版本选择 ${linked ? '关联组' : '单条'}：采用本机、失败与原请求重试、成功才解除`, async t => {
+  const s = await makeConflict(t, linked);
+  s.controls.fail = true;
+  await assert.rejects(choose(s, 'local')); assert.ok((await s.store.read()).blocked[s.id]);
+  s.controls.fail = false; await choose(s, 'local');
+  let state = await s.store.read(); assert.equal(state.blocked[s.id].resolving, true);
+  const job = state.outbox[s.id];
+  s.controls.loseReply = true; await s.engine.run();
+  state = await s.store.read(); assert.deepEqual(state.outbox[s.id], job); assert.ok(state.blocked[s.id]);
+  await assert.rejects(choose(s, 'remote'), /待确认/);
+  await s.engine.run(); state = await s.store.read();
+  assert.deepEqual(state.blocked, {}); assert.deepEqual(state.outbox, {});
+  assert.equal((await s.service.getItem({ id: s.id })).item.title, '本机选择内容');
+  assert.equal(state.data.items.length, linked ? 2 : 1); validateWorkbenchData(state.data);
+  assert.equal(s.controls.writes.at(-1), s.controls.writes.at(-2));
+});
+
+for (const linked of [false, true]) test(`版本选择 ${linked ? '关联组' : '单条'}：云端读取失败保留，成功保留一份本机副本`, async t => {
+  const s = await makeConflict(t, linked), before = await s.store.read();
+  s.controls.fail = true; await assert.rejects(choose(s, 'remote'));
+  assert.deepEqual((await s.store.read()).data, before.data);
+  s.controls.fail = false; await choose(s, 'remote');
+  const state = await s.store.read(); assert.equal(state.data.items.find(item => item.id === s.id).title, '云端选择内容');
+  assert.equal(Object.keys(state.heldLocal).length, linked ? 2 : 1); validateWorkbenchData(state.data);
+  await assert.rejects(choose(s, 'remote')); assert.deepEqual((await s.store.read()).data, state.data);
+});
+
+for (const choice of ['local', 'remote']) test(`版本选择 ${choice}：预览后再次变化必须重新选择`, async t => {
+  const s = await makeConflict(t);
+  await s.service.patchItem({ id: s.id, expectedVersion: 2, requestId: 'conflict-newer', fields: { title: '云端第三版' } });
+  await assert.rejects(choose(s, choice), /再次变化/);
+  const state = await s.store.read(); assert.equal(state.blocked[s.id].remote.version, 3);
+  assert.equal(state.data.items[0].title, '本机选择内容'); assert.equal(state.heldLocal, undefined);
+  await choose(s, choice); await s.engine.run();
+  assert.equal((await s.service.getItem({ id: s.id })).item.title, choice === 'local' ? '本机选择内容' : '云端第三版');
+});
+
+test('版本选择：读取后写入前云端变化仍由 CAS 拦截，整组不部分提交', async t => {
+  const s = await makeConflict(t, true); await choose(s, 'local');
+  const target = (await s.store.read()).data.items.find(item => item.type === 'shopping');
+  await s.service.patchItem({ id: s.id, expectedVersion: 2, requestId: 'conflict-after-choice', fields: { title: '选择之后又改' } });
+  await s.engine.run(); const state = await s.store.read();
+  assert.equal(state.blocked[s.id].remote.version, 3); assert.equal(state.blocked[s.id].resolving, undefined);
+  assert.equal((await s.service.getItem({ id: target.id })).version, 1);
+  assert.equal(state.data.items.find(item => item.id === s.id).title, '本机选择内容');
+  await choose(s, 'local'); await s.engine.run(); assert.deepEqual((await s.store.read()).blocked, {});
+});
+
+test('版本选择：另一个窗口在读取期间修改本机，拒绝过时选择', async t => {
+  const s = await makeConflict(t);
+  const api = { async get(...args) { const remote = await s.api.get(...args); await save(s, items => items.map(item => renameItem(item, '另一窗口草稿'))); return remote; } };
+  await assert.rejects(choose(s, 'remote', api), /另一个窗口/);
+  assert.equal((await s.store.read()).data.items[0].title, '另一窗口草稿');
+});
+
+test('版本选择：屏幕对照过时即使事项 revision 未变也拒绝；已删 ID 不复活', async t => {
+  const s = await makeConflict(t), before = await s.store.read();
+  await s.service.deleteItem({ id: s.id, expectedVersion: 2, requestId: 'conflict-delete-latest' });
+  await assert.rejects(choose(s, 'local'), /再次变化/);
+  await assert.rejects(resolveConflict({ store: s.store, api: s.api, id: s.id, choice: 'remote', revision: before.revision, displayed: before.blocked[s.id] }), /对照已变化/);
+  await assert.rejects(choose(s, 'local'), /删除标记/);
+  assert.equal((await s.service.syncState({ id: s.id })).deleted, true);
+  assert.equal((await s.store.read()).data.items[0].title, '本机选择内容');
+  await choose(s, 'remote'); assert.equal(Object.keys((await s.store.read()).heldLocal).length, 1);
+});
+
+test('版本选择：页面重建保留未确认请求、连接无关状态及双方内容', async t => {
+  const note = createNote('重开原文', at), s = fixture(t, [note]); s.id = note.id; await s.engine.run();
+  await save(s, items => items.map(item => renameItem(item, '重开本机')));
+  await s.service.patchItem({ id: note.id, expectedVersion: 1, requestId: 'reload-conflict', fields: { title: '重开云端' } });
+  await s.engine.run(); await choose(s, 'local');
+  s.controls.loseReply = true; await s.engine.run(); const pending = (await s.store.read()).outbox[note.id];
+  const reopened = createSyncStore({ indexedDB: s.indexedDB, storage: { getItem: () => JSON.stringify(data([note])) }, ownerPhone: true });
+  const engine = createSyncEngine({ store: reopened, api: s.api, schedule: () => 1, cancel: () => {} });
+  t.after(async () => { engine.stop(); await reopened.close(); });
+  assert.deepEqual((await reopened.read()).outbox[note.id], pending);
+  await engine.run(); assert.deepEqual((await reopened.read()).blocked, {});
+  assert.equal((await s.service.getItem({ id: note.id })).item.title, '重开本机');
+});
+
+test('版本选择：服务端明确拒绝仍保留整组双方，可改选云端且不重复副本', async t => {
+  const s = await makeConflict(t, true); await choose(s, 'local');
+  const before = await s.store.read(), job = before.outbox[s.id];
+  await s.store.block(job, { kind: 'rejected', code: 'INVALID_INPUT', message: '夹具明确拒绝' });
+  const after = await s.store.read();
+  assert.deepEqual(after.blocked[s.id].remote, before.blocked[s.id].remote);
+  assert.deepEqual(after.blocked[s.id].group, before.blocked[s.id].group);
+  assert.deepEqual(after.data, before.data); await choose(s, 'remote');
+  assert.equal(Object.keys((await s.store.read()).heldLocal).length, 2);
+});
 
 for (const type of ['note', 'waiting', 'shopping', 'creation']) test(`${type}: 自动纳入、编辑、完成恢复、原请求重试、云端拉取及删除墓碑`, async t => {
   const item = type === 'note' ? createNote('分类夹具', at) : createSimpleItem(type, '分类夹具', at);

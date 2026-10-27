@@ -147,6 +147,8 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
         if (!state.enabled) return null;
         for (const id of Object.keys(state.dirty)) {
           if (isKnownTestRecord(id)) continue;
+          // 用户选择本机后的请求仍保留冲突对照，直到服务端确认；失败重试同一请求。
+          if (state.blocked[id]?.resolving && state.outbox[id]) return state.outbox[id];
           if (state.blocked[id]) continue;
           if (state.outbox[id]) return state.outbox[id];
           const item = currentItem(state, id), binding = state.bindings[id];
@@ -178,6 +180,19 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
       return (await transact(state => {
         if (!allowed()) return;
         if (state.outbox[job.id]?.requestId !== job.requestId) return;
+        const resolving = state.blocked[job.id];
+        if (resolving?.resolving) {
+          const sent = new Set((job.entries ?? [job]).map(entry => entry.id));
+          for (const remote of resolving.group ?? [resolving.remote]) {
+            const key = remote.item?.id ?? remote.id;
+            state.archive.push({ id: key, local: copy(currentItem(state, key)), ...resolving, choice: 'local' });
+            if (!sent.has(key)) {
+              if (remote.missing) delete state.bindings[key];
+              else state.bindings[key] = { version: remote.version, base: remote.deleted ? null : remote.item, deleted: Boolean(remote.deleted) };
+              delete state.blocked[key]; delete state.outbox[key]; delete state.dirty[key];
+            }
+          }
+        }
         if (job.entries) {
           const unchanged = job.entries.every(entry => equal(currentItem(state, entry.id), entry.item));
           for (const entry of job.entries) {
@@ -204,9 +219,13 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
         if (!allowed()) return;
         if (state.outbox[job.id]?.requestId !== job.requestId) return;
         const entries = remote?.records ? remote.records.map(value => ({ id: value.item?.id ?? value.id })) : job.entries ?? [job];
-        for (const entry of entries) state.blocked[entry.id] = { kind: error.kind ?? 'rejected', code: error.code ?? '', message: error.message,
-          remote: remote?.records ? remote.records.find(value => (value.item?.id ?? value.id) === entry.id) : remote,
-          ...(remote?.records ? { group: remote.records } : {}), base: state.bindings[entry.id]?.base ?? null };
+        for (const entry of entries) {
+          const previous = state.blocked[entry.id];
+          // 明确拒绝也不能丢掉已展示的云端对照；未知网络失败则不进入这里，保留 resolving 原请求。
+          state.blocked[entry.id] = { kind: error.kind ?? 'rejected', code: error.code ?? '', message: error.message,
+            remote: remote?.records ? remote.records.find(value => (value.item?.id ?? value.id) === entry.id) : remote ?? previous?.remote ?? null,
+            ...(remote?.records ? { group: remote.records } : previous?.group ? { group: previous.group } : {}), base: state.bindings[entry.id]?.base ?? null };
+        }
       })).state;
     },
     async applyChanges(page, from, allowed = () => true) {
@@ -245,11 +264,50 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
         return true;
       })).result;
     },
-    async resolveWithCopy(id, revision) {
+    async reviewConflict(id, revision, original, records) {
+      return (await transact(state => {
+        expected(state, revision);
+        if (!equal(state.blocked[id], original)) throw new Error('冲突状态已变化，请核对后再选择。');
+        if (original.resolving) throw new Error('上次选择尚待服务端确认，将复用原请求重试，暂不能改选。');
+        const previous = original.group ?? [original.remote];
+        if (equal([...previous].sort((a, b) => (a.item?.id ?? a.id).localeCompare(b.item?.id ?? b.id)), [...records].sort((a, b) => (a.item?.id ?? a.id).localeCompare(b.item?.id ?? b.id)))) return true;
+        for (const remote of records) {
+          const key = remote.item?.id ?? remote.id;
+          state.blocked[key] = { kind: 'conflict', message: '云端再次变化，已更新双方对照，请重新选择。', remote,
+            group: records, base: state.bindings[key]?.base ?? null };
+        }
+        return false;
+      })).result;
+    },
+    async resolveWithLocal(id, revision, original) {
+      return (await transact(state => {
+        expected(state, revision);
+        const conflict = state.blocked[id];
+        if (!conflict?.remote || !equal(conflict, original)) throw new Error('冲突状态已变化，请重新核对。');
+        if (conflict.resolving) return;
+        const records = conflict.group ?? [conflict.remote];
+        // 已删除 ID 不允许复活；保留双方，不能偷偷退化成采用云端。
+        if (records.some(remote => remote.deleted && !remote.missing && currentItem(state, remote.id))) throw new Error('云端已删除此 ID，不能直接覆盖删除标记。双方内容仍保留，尚未解决。');
+        const entries = records.flatMap(remote => {
+          const key = remote.item?.id ?? remote.id, item = currentItem(state, key);
+          return !item && remote.deleted ? [] : [{ id: key, expectedVersion: remote.version, item: copy(item) }];
+        });
+        if (!entries.length) throw new Error('双方均已删除，请采用云端确认删除结果。');
+        const job = entries.length > 1 ? { id: entries[0].id, requestId: uuid(), entries } : { ...entries[0], requestId: uuid() };
+        // 用户选择与不可变内容在一个本机事务中落盘；不修改基准，也不清除冲突。
+        for (const entry of entries) {
+          state.outbox[entry.id] = job; state.dirty[entry.id] = true;
+          state.blocked[entry.id] = { ...(state.blocked[entry.id] ?? conflict), resolving: true, message: '已选择本机，等待服务端确认；失败保留双方并按原请求重试。' };
+        }
+      })).state;
+    },
+    async resolveWithCopy(id, revision, original) {
       return (await transact(state => {
         expected(state, revision);
         const conflict = state.blocked[id];
         if (!conflict?.remote) throw new Error('尚未取得云端版本，请恢复连接后重新核对。');
+        if (original && !equal(original, conflict)) throw new Error('冲突状态已变化，请重新核对。');
+        if (conflict.resolving) throw new Error('上次选择尚待确认，不能丢弃结果不明的请求。');
         if (conflict.group) {
           const ids = conflict.group.map(value => value.item?.id ?? value.id), copies = new Map();
           for (const key of ids) if (currentItem(state, key)) copies.set(key, uuid());

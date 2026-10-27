@@ -4,6 +4,7 @@ import { createSyncApi } from './syncApi.js';
 import { createSyncEngine } from './syncEngine.js';
 import { sharedCloudAuth } from '../cloud/useCloudWorkbench.js';
 import { isOwnerPhoneTarget, prepareOwnerPhoneSync } from './ownerPhone.js';
+import { resolveConflict } from './resolveConflict.js';
 
 export function useSyncWorkbench() {
   const snapshot = shallowRef(null);
@@ -60,8 +61,8 @@ export function useSyncWorkbench() {
     async enroll({ ids, revision }) {
       try { snapshot.value = await store.enroll(ids, revision); engine.wake(); } catch (error) { fail(error); }
     },
-    async resolve(id) {
-      try { snapshot.value = await store.resolveWithCopy(id, snapshot.value.revision); engine.wake(); } catch (error) { fail(error); }
+    async resolve({ id, choice, revision, displayed }) {
+      try { snapshot.value = await resolveConflict({ store, api, id, choice, revision, displayed }); engine.wake(); } catch (error) { fail(error); }
     },
   };
 }

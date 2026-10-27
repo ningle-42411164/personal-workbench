@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { NODE_ONE_VERSION } from '../sync/ownerPhone.js';
 import { isKnownTestRecord } from '../sync/knownTestRecords.js';
 const props = defineProps({ snapshot: Object, status: Object, connection: Object, ownerPhone: Boolean });
@@ -8,6 +8,27 @@ const pending = computed(() => Object.keys(props.snapshot?.dirty ?? {}).length);
 const conflicts = computed(() => Object.entries(props.snapshot?.blocked ?? {}).map(([id, value]) => ({ id, ...value, local: props.snapshot.data.items.find(item => item.id === id) })));
 const testRecords = computed(() => props.snapshot?.data.items.filter(item => isKnownTestRecord(item.id)) ?? []);
 const heldCopies = computed(() => props.snapshot?.data.items.filter(item => props.snapshot.heldLocal?.[item.id]) ?? []);
+const choices = ref({});
+const groups = computed(() => {
+  const seen = new Set();
+  return conflicts.value.filter(conflict => {
+    if (seen.has(conflict.id)) return false;
+    for (const remote of conflict.group ?? [conflict.remote]) if (remote) seen.add(remote.item?.id ?? remote.id);
+    seen.add(conflict.id); return true;
+  });
+});
+const rows = conflict => (conflict.group ?? [conflict.remote]).filter(Boolean).map(remote => {
+  const id = remote.item?.id ?? remote.id;
+  return { id, remote, local: props.snapshot.data.items.find(item => item.id === id), version: props.snapshot.bindings[id]?.version ?? 0 };
+});
+function summary(item) {
+  if (!item) return '已删除／不存在';
+  return [item.title || '未命名项目', `分类 ${item.type}`, item.tags?.length ? `标签 ${item.tags.join('、')}` : '',
+    'done' in item ? (item.done ? '已完成' : '未完成') : '', item.status ? `状态 ${item.status}` : '',
+    item.currentSituation ? `当前情况 ${item.currentSituation}` : '', item.nextStep ? `下一步 ${item.nextStep}` : '',
+    item.targetDate || item.dueDate || '', item.priority ? '优先' : '', item.urgent ? '急需处理' : '',
+    item.convertedToId ? `关联 ${item.convertedToId}` : ''].filter(Boolean).join('；');
+}
 </script>
 
 <template>
@@ -24,15 +45,25 @@ const heldCopies = computed(() => props.snapshot?.data.items.filter(item => prop
     <button v-else-if="snapshot && !ownerPhone && connection.auth.state === 'connected'" type="button" @click="emit('enabled', true)">启用已绑定事项同步</button>
     <p v-if="!connection.auth.canWrite && (connection.auth.remembered || snapshot?.nodeOne)">正在等待有效读写连接；已保存的连接会自动恢复。本机无需登录，连接失效时可在上方处理，事项和待同步修改不会清除。</p>
     <p v-if="status.lastSuccess">最后完成同步：{{ new Date(status.lastSuccess).toLocaleString() }}</p>
-    <article v-for="conflict in conflicts" :key="conflict.id" class="import-confirm">
+    <article v-for="conflict in groups" :key="conflict.id" class="import-confirm">
       <h3>{{ conflict.local?.title || conflict.remote?.item?.title || '已在本机删除的事项' }}</h3>
       <p>{{ conflict.message }}</p>
-      <p>本机：{{ conflict.local ? conflict.local.title || '未命名项目' : '已删除' }}</p>
-      <p v-if="conflict.local?.type === 'project'">当前情况：{{ conflict.local.currentSituation }}；下一步：{{ conflict.local.nextStep }}</p>
       <template v-if="conflict.remote">
-        <p>云端：{{ conflict.remote.deleted ? '已删除' : conflict.remote.item.title || '未命名项目' }}</p>
-        <p v-if="conflict.remote.item?.type === 'project'">当前情况：{{ conflict.remote.item.currentSituation }}；下一步：{{ conflict.remote.item.nextStep }}</p>
-        <button type="button" class="secondary" @click="emit('resolve', conflict.id)">保留本机副本并采用云端</button>
+        <p v-if="conflict.group?.length > 1">以下 {{ conflict.group.length }} 条关联记录一起选择、一起提交。</p>
+        <div v-for="row in rows(conflict)" :key="row.id">
+          <p>本机（基于 v{{ row.version }} 的修改）：{{ summary(row.local) }}</p>
+          <p>云端 v{{ row.remote.version }}：{{ summary(row.remote.item) }}</p>
+        </div>
+        <template v-if="!conflict.resolving">
+          <label>选择版本 <select v-model="choices[conflict.id]">
+            <option :value="undefined" disabled>请选择</option>
+            <option value="local">采用本机版本</option>
+            <option value="remote">采用云端版本</option>
+          </select></label>
+          <p v-if="choices[conflict.id] === 'local'">本机内容将成为继续同步的版本；提交前核对最新云端版本，再次变化则重新提示。已删除 ID 不会被强行复活。</p>
+          <p v-if="choices[conflict.id] === 'remote'">采用最新云端内容；现有本机内容另存冲突副本，副本不自动上传。</p>
+          <button type="button" class="secondary" :disabled="!choices[conflict.id]" @click="emit('resolve', { id: conflict.id, choice: choices[conflict.id], revision: snapshot.revision, displayed: snapshot.blocked[conflict.id] })">确认选择</button>
+        </template>
       </template>
       <p>本机冲突副本继续保留，不自动覆盖或再次上传；核对后可在原事项中处理。</p>
     </article>
