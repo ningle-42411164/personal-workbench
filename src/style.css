@@ -174,3 +174,13 @@ footer { margin-top: 28px; font-size: 13px; line-height: 1.7; }
   .project-field-value, .project-field-editor { grid-column: 1 / -1; }
   .project-close { grid-column: 2; }
 }
+/* 项目共用卡片：正文单独滚动，关闭入口保持可见；视觉视口随输入法调整。 */
+.project-dialog { box-sizing: border-box; width: min(600px, calc(100vw - 48px)); max-height: min(78dvh, calc(var(--card-height, 100dvh) - 48px)); padding: 0; position: fixed; top: var(--card-top, 50%); bottom: auto; transform: translateY(-50%); margin: 0 auto; overflow: hidden; }
+.project-dialog[open] { display: flex; flex-direction: column; }
+.project-dialog-head { flex: none; padding: 12px 16px; border-bottom: 1px solid #e7ede7; background: #fff; }
+.project-dialog-head .project-close { flex-basis: 48px; width: 48px; height: 48px; padding: 0; font-size: 32px; line-height: 1; color: #243d36; background: #edf2ed; }
+.project-dialog-body { min-height: 0; padding: 0 16px 16px; overflow-y: auto; overscroll-behavior: contain; overflow-wrap: anywhere; }
+.project-dialog-body input, .project-dialog-body textarea, .project-dialog-body select { max-width: 100%; min-width: 0; box-sizing: border-box; scroll-margin: 16px; }
+.project-dialog-body .project-edit { margin-top: 16px; }
+.quick-tag-summary { overflow-wrap: anywhere; }
+@media (max-width: 480px) { .project-dialog { width: calc(100vw - 40px); } .project-dialog-body .project-date-fields { grid-template-columns: minmax(0, 1fr); } }

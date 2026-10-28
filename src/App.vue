@@ -11,7 +11,7 @@ import { useSyncWorkbench } from './sync/useSyncWorkbench.js';
 import { equal } from './sync/syncStore.js';
 import { isKnownTestRecord } from './sync/knownTestRecords.js';
 import { useCloudWorkbench } from './cloud/useCloudWorkbench.js';
-import { availableUserTags } from './data/userTags.js';
+import { normalizeUserTags, availableUserTags } from './data/userTags.js';
 import { readSplashEnabled, writeSplashEnabled } from './data/splashPreference.js';
 import { COMPLETABLE_TYPES, comparePriorityThenNewest, convertNote, createImportantDate, createNote, createRoutine, createSimpleItem, createTodo, daysUntil, emptyWorkbenchData, isCalendarDate, readWorkbenchData, removeItem, renameItem, toggleTodo, validateWorkbenchData } from './data/workbenchData.js';
 
@@ -61,6 +61,8 @@ const message = ref('');//保存需要展示给用户的错误提示
 const needProcessing = ref(false);
 const showMoreOptions = ref(false);
 const quickType = ref('default');
+// 标签随整份草稿保留；收起和切换类型不清空，保存成功才清空。
+const quickTags = ref([]);
 const quickTargetDate = ref('');
 const quickTypes = [
   { type: 'todo', label: '一次性待办' }, { type: 'importantDate', label: '重要日' },
@@ -213,9 +215,11 @@ async function addTask() {
     : quickType.value === 'importantDate'
       ? createImportantDate(title.value.trim(), quickTargetDate.value, now, needProcessing.value)
       : createSimpleItem(quickType.value, title.value.trim(), now, needProcessing.value);
-  // 先生成新数组交给保存入口，只有返回 true 才清空草稿，失败时输入还留在页面上。
+  item.tags = normalizeUserTags(quickTags.value);
+  // 先生成新数组交给保存入口，只有返回 true 才清空草稿，失败时输入和标签保留。
   if (await saveTasks([...workbenchData.value.items, item])) {
     title.value = '';
+    quickTags.value = [];
     needProcessing.value = false;
     urgent.value = false;
     quickType.value = 'default';
@@ -441,7 +445,9 @@ async function confirmImport() {
           <button :disabled="!canEditLocal">记录</button>
         </div>
       </div>
+      <p v-if="quickTags.length" class="quick-tag-summary">本次将保存标签：{{ quickTags.map(tag => '#' + tag).join('、') }}</p>
       <div v-if="showMoreOptions" class="more-options">
+        <fieldset class="project-tag-picker"><legend>已有标签（可不选或多选）</legend><div class="project-choice-list"><label v-for="tag in availableProjectTags" :key="tag"><input v-model="quickTags" type="checkbox" :value="tag" :disabled="!canEditLocal">#{{ tag }}</label></div></fieldset>
         <div class="quick-type-options" role="group" aria-label="记录类型">
           <button v-for="option in quickTypes" :key="option.type" type="button" :aria-pressed="quickType === option.type" @click="quickType = option.type; onQuickTypeChange()">{{ option.label }}</button>
           <button v-if="quickType !== 'default'" type="button" @click="quickType = 'default'; onQuickTypeChange()">清除选择</button>
@@ -459,6 +465,7 @@ async function confirmImport() {
           <div class="item-line"><button type="button" class="date-card-title" :aria-expanded="selectedDetailId === item.id" @click="selectedDetailId = selectedDetailId === item.id ? null : item.id">{{ item.title }}</button><span v-if="item.priority === true" class="urgent-mark item-status">优先处理</span></div>
           <span class="date-count">{{ countdownText(item.targetDate) }}</span>
           <time :datetime="item.targetDate">{{ item.targetDate }}</time>
+          <span v-for="tag in item.tags" :key="tag" class="project-user-tag">#{{ tag.replace(/^#+/, '') }}</span>
           <div v-if="selectedDetailId === item.id" class="item-detail detail-actions"><button type="button" class="text-button danger delete-button" :disabled="!canEditLocal" @click="deleteItem(item.id)">删除</button></div>
         </article>
       </div>
