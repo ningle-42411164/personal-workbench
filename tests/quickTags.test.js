@@ -4,7 +4,7 @@ import { createTodo, createNote, createImportantDate, createSimpleItem, validate
 import { normalizeUserTags } from '../src/data/userTags.js';
 
 test('快速记录各类型的多标签保持原格式并兼容完整备份，空标签仍有效', () => {
-  const factories = [() => createTodo('标签待办'), () => createNote('标签随笔'),
+  const factories = [() => createTodo('标签待办', false), () => createNote('标签随笔'),
     () => createImportantDate('标签重要日', '2027-01-01'),
     ...['project', 'waiting', 'shopping', 'creation'].map(type => () => createSimpleItem(type, '标签事项'))];
   for (const make of factories) {
@@ -14,3 +14,4 @@ test('快速记录各类型的多标签保持原格式并兼容完整备份，�
     item.tags = []; assert.doesNotThrow(() => validateWorkbenchData({ schemaVersion: 2, items: [item] }));
   }
 });
+
