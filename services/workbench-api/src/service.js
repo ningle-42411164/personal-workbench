@@ -108,7 +108,9 @@ export class WorkbenchService {
       // 校验转换随笔时取同一所有者的真实目标，不删关联字段来绕过 v2 规则。
       const target = current.item.convertedToId ? await this.store.get(current.item.convertedToId) : null;
       if (current.item.convertedToId && !target) throw new ApiError(409, 'VERSION_CONFLICT', '转换目标已变化，请保留修改并重新读取。');
-      return this.store.update(parsed.requestId, hash, current, patchItem(current.item, parsed.fields, target ? [target.item] : []));
+      const next = patchItem(current.item, parsed.fields, target ? [target.item] : []);
+      if (next.type === 'project' && next !== current.item) next.rank = await this.store.frontRank(next);
+      return this.store.update(parsed.requestId, hash, current, next);
     });
   }
   async completeItem(input) {
@@ -124,7 +126,10 @@ export class WorkbenchService {
     const parsed = createSchema.parse(input);
     const hash = await fingerprint('create_item', parsed);
     const replay = await this.store.receipt(parsed.requestId, hash);
-    return replay ?? this.store.create(parsed.requestId, hash, makeItem(parsed));
+    if (replay) return replay;
+    const item = makeItem(parsed);
+    if (item.type !== 'routine') item.rank = await this.store.frontRank(item);
+    return this.store.create(parsed.requestId, hash, item);
   }
   async updateProject(input) {
     this.require(READ_SCOPE);
@@ -135,6 +140,8 @@ export class WorkbenchService {
     if (replay) return replay;
     const record = await this.getProject({ id: parsed.id });
     if (record.version !== parsed.expectedVersion) throw new ApiError(409, 'VERSION_CONFLICT', '记录已变化，请重新读取并与当前修改比较。');
-    return this.store.update(parsed.requestId, hash, record, patchProject(record.item, parsed.fields));
+    const next = patchProject(record.item, parsed.fields);
+    if (next !== record.item) next.rank = await this.store.frontRank(next);
+    return this.store.update(parsed.requestId, hash, record, next);
   }
 }

@@ -47,6 +47,7 @@ const tagOptions = computed(() => normalizeUserTags([...props.availableTags, ...
 const statusOptions = [{ value: 'active', label: '进行中' }, { value: 'paused', label: '暂停中' }, { value: 'done', label: '已完成' }];
 
 async function beginEdit(field) {
+  if (editingField.value === field.key) { await editor.commit(); return; }
   if (!await editor.begin(field.key)) return;
   await nextTick();
   // 控件显示之后再聚焦，桌面和手机采用同一套单击编辑流程。

@@ -29,7 +29,7 @@ onBeforeUnmount(() => {
 <template>
   <Teleport to="body">
     <dialog ref="dialog" class="project-dialog" :aria-label="title" @cancel.prevent="requestClose" @pointerdown="outside = isOutside($event)" @click="if (outside && isOutside($event)) requestClose(); outside = false">
-      <header class="project-dialog-head"><h2 class="project-dialog-title" tabindex="-1">{{ title }}</h2><button type="button" class="project-close" :aria-label="`关闭${title}`" @click="requestClose">×</button></header>
+      <header class="project-dialog-head"><h2 class="project-dialog-title" tabindex="-1">{{ title }} <slot name="hint" /></h2><button type="button" class="project-close" :aria-label="`关闭${title}`" @click="requestClose">×</button></header>
       <div class="project-dialog-body"><slot /></div>
     </dialog>
   </Teleport>

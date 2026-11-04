@@ -325,3 +325,24 @@ test('旧完成字段缺省可保留，错误的状态组合不能上传，冲�
   await s.engine.run(); const state = await s.store.read();
   assert.equal(state.data.items[0].title, '本机待同步'); assert.equal(state.blocked[item.id].remote.item.title, '服务端另改');
 });
+test('排序与置顶走现有队列；回执丢失原请求重试，另一设备拉取并保留冲突', async t => {
+  const {compareRows,returnTodo}=await import('../src/data/itemOrder.js');
+  const note=createNote('离线来源',at), items=convertNote([note],note.id,'todo'), s=fixture(t,items);
+  await s.engine.run();
+  const desktop=createSyncStore({indexedDB:new IDBFactory(),storage:{getItem:()=>null}});
+  const peer=createSyncEngine({store:desktop,api:s.api,schedule:()=>1,cancel:()=>{}});
+  t.after(async()=>{peer.stop();await desktop.close()});
+  await desktop.setEnabled(true);await peer.run();
+  const target=items.find(x=>x.type==='todo');await save(s,all=>returnTodo(all,target.id));
+  s.controls.loseReply=true;await s.engine.run();await s.engine.run();
+  assert.equal(s.controls.writes.at(-1),s.controls.writes.at(-2));await peer.run();
+  const second=await desktop.read();assert.equal(second.data.items.find(x=>x.id===target.id).type,'note');
+  validateWorkbenchData(second.data);
+  await desktop.save(data(second.data.items.map(x=>x.id===target.id?{...x,rank:-20}:x)),second.revision);
+  await save(s,all=>all.map(x=>x.id===target.id?{...x,rank:-30}:x));await s.engine.run();await peer.run();
+  assert.ok((await desktop.read()).blocked[target.id]);assert.equal((await s.service.getItem({id:target.id})).item.rank,-30);
+  const p=await s.service.create({requestId:'isolated-order-project',type:'project',title:'顺序夹具'});
+  await s.engine.run();await save(s,all=>all.map(x=>x.id===p.item.id?{...x,pinned:true,rank:-40}:x));await s.engine.run();
+  const before=await s.service.getProject({id:p.item.id});const next=await s.service.updateProject({id:p.item.id,requestId:'isolated-order-edit',expectedVersion:before.version,fields:{nextStep:'继续'}});
+  assert.equal(next.item.pinned,true);assert.ok(compareRows(next.item,before.item)<0);assert.deepEqual(next.item.updates,before.item.updates);
+});

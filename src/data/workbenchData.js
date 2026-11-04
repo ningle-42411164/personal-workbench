@@ -105,6 +105,7 @@ export function validateWorkbenchData(data) {
         throw new Error(`${position}的随笔转换信息不完整。`);
       }
     }
+    if (item.rank !== undefined && !Number.isFinite(item.rank) || item.pinned !== undefined && (item.type !== 'project' || typeof item.pinned !== 'boolean') || item.returnedFromTodo !== undefined && (item.type !== 'note' || item.returnedFromTodo !== true)) throw new Error('无效的排序或退回标记。');
     if (ids.has(item.id)) {
       throw new Error(`备份中存在重复 ID：${item.id}`);
     }
@@ -113,7 +114,7 @@ export function validateWorkbenchData(data) {
   for (const item of data.items) {
     if (item.type === 'note' && item.convertedToId) {
       const target = data.items.find(candidate => candidate.id === item.convertedToId);
-      if (!target || target.type !== item.convertedToType) {
+      if (!target || (target.type !== item.convertedToType && !(item.convertedToType === 'todo' && target.type === 'note' && target.returnedFromTodo === true))) {
         throw new Error(`随笔“${item.title}”的已录入目标不存在或类型不一致。`);
       }
     }

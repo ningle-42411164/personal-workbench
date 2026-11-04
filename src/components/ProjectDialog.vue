@@ -18,7 +18,7 @@ defineExpose({ saveBeforeLeave });
 
 <template>
   <ProjectCard title="项目详情" :request-close="requestClose">
-      <p id="project-dialog-hint" class="cloud-note">修改后切换字段或关闭会先保存；保存失败时保留输入。点“取消”只放弃当前未提交修改。</p>
+    <template #hint><button type="button" class="hint-button" aria-label="项目编辑提示" aria-describedby="project-dialog-hint" popovertarget="project-dialog-hint">?</button><span popover="auto" id="project-dialog-hint" role="tooltip" class="field-hint">修改后切换字段或关闭会先保存<br>保存失败时保留输入<br>点“取消”只放弃当前未提交修改</span></template>
       <ProjectDetail ref="detail" :project="props.project" :can-edit="canEdit" :available-tags="availableTags" :save-project="saveProject" :delete-project="deleteProject" @close="requestClose" />
 
   </ProjectCard>

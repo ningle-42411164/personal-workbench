@@ -130,6 +130,14 @@ export class D1Store {
     }
     return committed;
   }
+  async frontRank(item) {
+    // 核对同一所有者的实际最前位置；手动排序可能早于单纯的创建时间。
+    const result = await this.db.prepare(`SELECT MIN(COALESCE(json_extract(item_json,'$.rank'),
+      -(julianday(json_extract(item_json,'$.createdAt'))-2440587.5)*86400000)) AS first_rank
+      FROM workbench_items WHERE owner_id=? AND item_id<>? AND json_extract(item_json,'$.type')=?`)
+      .bind(this.ownerId,item.id,item.type).first();
+    return Math.min(-Date.now(),result?.first_rank == null ? Infinity : result.first_rank-1);
+  }
   async update(requestId, hash, current, item) {
     const replay = await this.receipt(requestId, hash);
     if (replay) return replay;
