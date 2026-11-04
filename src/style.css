@@ -68,6 +68,7 @@ input:focus, select:focus { border-color: #244d43; }
 .todo-created { color: #748079; font-size: 12px; font-weight: 400; overflow-wrap: anywhere; }
 .todo-detail { grid-column: 2 / -1; color: #65766e; font-size: 13px; line-height: 1.6; }
 .urgent-mark { color: #8b4f2b; background: #f4e8dc; border-radius: 999px; font-size: 12px; padding: 4px 8px; white-space: nowrap; }
+.inline-urgent { display:inline-block; margin-inline-start:0.35em; padding:1px 5px; vertical-align:baseline; }
 .todo-status { display: flex; justify-self: end; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
 .completed .todo-title { text-decoration: line-through; color: #748079; }
 .category-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }

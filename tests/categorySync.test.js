@@ -346,3 +346,43 @@ test('排序与置顶走现有队列；回执丢失原请求重试，另一设�
   const before=await s.service.getProject({id:p.item.id});const next=await s.service.updateProject({id:p.item.id,requestId:'isolated-order-edit',expectedVersion:before.version,fields:{nextStep:'继续'}});
   assert.equal(next.item.pinned,true);assert.ok(compareRows(next.item,before.item)<0);assert.deepEqual(next.item.updates,before.item.updates);
 });
+
+test('七类置顶通过存储与另一设备拉取；旧紧急、单撤紧急与取消置顶分开处理', async t => {
+  const {createTodo, createProject} = await import('../src/data/workbenchData.js');
+  const {subgroup, togglePin, moveRank} = await import('../src/data/itemOrder.js');
+  const todo = createTodo('旧紧急', true);
+  delete todo.pinned;
+  const items = [todo, createNote('随笔'), createImportantDate('日期','2027-01-01'), createProject('项目'),
+    ...['waiting','shopping','creation'].map(type => createSimpleItem(type,type,at,false))];
+  const s = fixture(t, items);
+  await s.engine.run();
+  assert.equal(subgroup(todo), 0);
+  assert.equal(moveRank([todo, {...todo,id:'other',urgent:false,pinned:true}],0,1), null);
+  await save(s, rows => rows.map(row => row.type === 'todo' ? row : togglePin(row)));
+  s.controls.loseReply = true;
+  await s.engine.run();
+  await s.engine.run();
+  const record = await s.service.getItem({id:todo.id});
+  const ordinary = await s.service.patchItem({id:todo.id, expectedVersion:record.version, requestId:'pin-release-urgent', fields:{urgent:false}});
+  assert.equal(subgroup(ordinary.item), 1);
+  const urgent = await s.service.patchItem({id:todo.id, expectedVersion:ordinary.version, requestId:'pin-restore-urgent', fields:{urgent:true}});
+  assert.equal(subgroup(urgent.item), 0);
+  await s.engine.run();
+  await save(s, rows => rows.map(row => row.id === todo.id ? togglePin(row) : row));
+  await s.engine.run();
+  const second = createSyncStore({indexedDB:new IDBFactory(),storage:{getItem:()=>null}});
+  const peer = createSyncEngine({store:second,api:s.api,schedule:()=>1,cancel:()=>{}});
+  t.after(async()=>{peer.stop(); await second.close()});
+  await second.setEnabled(true);
+  await peer.run();
+  const restored = (await second.read()).data;
+  validateWorkbenchData(restored);
+  assert.equal(restored.items.length, 7);
+  for (const row of restored.items) {
+    if(row.id === todo.id) {
+      assert.equal(row.urgent,false);
+      assert.equal(row.pinned,false);
+      assert.equal(subgroup(row),2);
+    } else assert.equal(row.pinned,true);
+  }
+});

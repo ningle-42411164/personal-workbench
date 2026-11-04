@@ -4,9 +4,10 @@ import { useRegisterSW } from 'virtual:pwa-register/vue';
 import LaunchSplash from './components/LaunchSplash.vue';
 import ImportantDateDeck from './components/ImportantDateDeck.vue';
 import SyncSymbol from './components/SyncSymbol.vue';
+import QuickHelp from './components/QuickHelp.vue';
 import SortList from './components/SortList.vue';
 import SortToggle from './components/SortToggle.vue';
-import { compareRows, frontRank, moveRank, returnTodo } from './data/itemOrder.js';
+import { togglePin, compareRows, frontRank, moveRank, returnTodo } from './data/itemOrder.js';
 import ProjectDialog from './components/ProjectDialog.vue';
 import ProjectCreate from './components/ProjectCreate.vue';
 import OrdinaryItem from './components/OrdinaryItem.vue';
@@ -183,7 +184,11 @@ async function moveRow(rows,from,to) {
   try{const rank=moveRank(rows,from,to);if(rank!==null)await saveTasks(workbenchData.value.items.map(x=>x.id===rows[from].id?{...x,...rank}:x));}
   catch(error){message.value=error.message;}
 }
-async function pinRow(item){const next={...item,pinned:!item.pinned}; next.rank=frontRank(personalItems.value,next);await saveTasks(workbenchData.value.items.map(x=>x.id===item.id?next:x));}
+async function pinRow(item) {
+  const next = togglePin(item);
+  next.rank = frontRank(personalItems.value, next);
+  await saveTasks(workbenchData.value.items.map(row => row.id === item.id ? next : row));
+}
 async function sendBack(id){if(await saveTasks(returnTodo(workbenchData.value.items,id))){selectedTodoId.value=null;toast.value='已退回随笔';clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.value='',2200);}}
 let midnightTimer;
 function refreshToday() {
@@ -470,12 +475,12 @@ async function confirmImport() {
     <form class="panel quick-form" @submit.prevent="addTask">
       <div class="quick-heading">
         <label for="task-title">快速记录</label>
-        <small class="quick-hint">{{ quickType === 'default' ? '默认存入随笔；勾选后成为待办。' : '优先处理的事项会在本分类置顶。' }}</small>
+        <QuickHelp>{{ quickType === 'default' ? '默认存入随笔；勾选“录入待办”后存入一次性待办。' : '勾选“优先处理”会为所选分类的事项添加优先处理标记。' }}</QuickHelp>
       </div>
       <input id="task-title" v-model="title" maxlength="150" placeholder="记录一下..." :disabled="!canEditLocal">
       <div class="form-actions">
         <div class="quick-options">
-          <label><input v-model="needProcessing" type="checkbox"> {{ quickType === 'default' ? '需要处理' : '优先处理' }}</label>
+          <label><input v-model="needProcessing" type="checkbox"> {{ quickType === 'default' ? '录入待办' : '优先处理' }}</label>
           <label v-if="quickType === 'default' && needProcessing"><input v-model="urgent" type="checkbox"> 急需处理</label>
         </div>
         <div class="quick-actions">
@@ -498,7 +503,7 @@ async function confirmImport() {
 
     <section class="panel date-section" aria-label="重要日卡片">
       <div class="category-heading"><strong>重要日</strong><small>{{importantDates.length}} 个</small><SortToggle :active="sorting === 'importantDate'" @click="toggleSort('importantDate')" /><button class="mini-add" aria-label="添加重要日" @click="showImportantForm ? closeImportantForm() : showImportantForm=true">{{showImportantForm ? '×' : '+'}}</button></div>
-      <SortList v-if="sorting === 'importantDate'" :items="importantDates" @move="moveRow" @exit="sorting=null" />
+      <SortList v-if="sorting === 'importantDate'" :items="importantDates" @move="moveRow" @pin="pinRow" @exit="sorting=null" />
       <ImportantDateDeck v-else :items="importantDates" :today="today" :can-edit="canEditLocal" @delete="deleteItem" />
       <form v-if="showImportantForm" class="date-form" @submit.prevent="addImportantDate">
         <label for="important-title">名称</label>
@@ -537,7 +542,7 @@ async function confirmImport() {
       <p v-if="showProjects && !projects.length" class="empty">还没有项目</p>
       <SortList v-if="sorting === 'project'" :items="sortRows('project')" @move="moveRow" @pin="pinRow" @exit="sorting=null" />
       <article v-else v-for="(item, index) in visibleProjects" :key="item.id" class="category-row" :class="{paused:item.status==='paused'}">
-        <div class="item-line"><button type="button" class="category-title project-list-trigger" :aria-label="item.title ? undefined : '打开空名称项目详情'" :aria-expanded="selectedProjectId === item.id" @click="toggleProjectDetails(item.id)">{{ item.title }}<small v-if="item.pinned"> · 已置顶</small><span v-for="tag in item.tags" :key="tag" class="project-user-tag">#{{ tag.replace(/^#+/, '') }}</span><span v-if="!showProjects && projects.length > 2 && index === 1" class="more-ellipsis" aria-hidden="true">……</span></button><span v-if="item.priority === true" class="urgent-mark item-status">优先处理</span></div>
+        <div class="item-line"><button type="button" class="category-title project-list-trigger" :aria-label="item.title ? undefined : '打开空名称项目详情'" :aria-expanded="selectedProjectId === item.id" @click="toggleProjectDetails(item.id)">{{ item.title }}<span v-for="tag in item.tags" :key="tag" class="project-user-tag">#{{ tag.replace(/^#+/, '') }}</span><span v-if="!showProjects && projects.length > 2 && index === 1" class="more-ellipsis" aria-hidden="true">……</span></button><span v-if="item.priority === true" class="urgent-mark item-status">优先处理</span></div>
         <p class="project-next-step">{{ item.nextStep }}</p>
       </article>
     </section>

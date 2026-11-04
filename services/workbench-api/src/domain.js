@@ -29,18 +29,21 @@ export const convertSchema = z.object({ ...versioned, targetType: z.enum(['todo'
 // 同步复用本机 v2 记录，保留离线操作时间和已有项目历史；不是导入任意 JSON 的入口。
 const timestamp = z.string().datetime();
 const snapshotBase = { rankTie: z.string().regex(/^[A-Za-z0-9]+$/).max(512).optional(), rank: z.number().finite().optional(), id: z.string().uuid(), title, tags, createdAt: timestamp, updatedAt: timestamp, priority: z.boolean().optional() };
+const sortableSnapshot = { ...snapshotBase, pinned: z.boolean().optional() };
 export const syncSchema = z.object({ requestId, id: z.string().uuid(), expectedVersion: z.number().int().min(0), item: z.discriminatedUnion('type', [
-  ...['waiting', 'shopping', 'creation'].map(type => z.object({ ...snapshotBase, type: z.literal(type), done: z.boolean().optional(), completedAt: timestamp.nullable().optional() }).strict()),
-  z.object({ ...snapshotBase, type: z.literal('note'), returnedFromTodo: z.literal(true).optional(), done: z.boolean().optional(), completedAt: timestamp.nullable().optional(), convertedToId: z.string().uuid().optional(), convertedToType: z.enum(['todo', 'project', 'importantDate', 'waiting', 'shopping', 'creation']).optional(), convertedAt: timestamp.optional() }).strict(),
+  ...['waiting', 'shopping', 'creation'].map(type => z.object({ ...sortableSnapshot, type: z.literal(type), done: z.boolean().optional(), completedAt: timestamp.nullable().optional() }).strict()),
+  z.object({ ...sortableSnapshot, type: z.literal('note'), returnedFromTodo: z.literal(true).optional(), done: z.boolean().optional(), completedAt: timestamp.nullable().optional(), convertedToId: z.string().uuid().optional(), convertedToType: z.enum(['todo', 'project', 'importantDate', 'waiting', 'shopping', 'creation']).optional(), convertedAt: timestamp.optional() }).strict(),
   z.object({ ...snapshotBase, type: z.literal('routine') }).strict(),
-  z.object({ ...snapshotBase, type: z.literal('importantDate'), targetDate: date }).strict(),
-  z.object({ ...snapshotBase, type: z.literal('todo'), urgent: z.boolean(), done: z.boolean(), completedAt: timestamp.nullable() }).strict(),
-  z.object({ ...snapshotBase, type: z.literal('project'), pinned: z.boolean().optional(), status: z.enum(['active', 'paused', 'done']).nullable().optional(), startDate: date.nullable().optional(), dueDate: date.nullable().optional(), currentSituation: z.string().max(10000).optional(), nextStep: z.string().max(10000).optional(), completedAt: timestamp.nullable().optional(), updates: z.array(z.object({ id: z.string().min(1), content: z.string().max(10000), createdAt: timestamp }).strict()).optional() }).strict(),
+  z.object({ ...sortableSnapshot, type: z.literal('importantDate'), targetDate: date }).strict(),
+  z.object({ ...sortableSnapshot, type: z.literal('todo'), urgent: z.boolean(), done: z.boolean(), completedAt: timestamp.nullable() }).strict(),
+  z.object({ ...sortableSnapshot, type: z.literal('project'), status: z.enum(['active', 'paused', 'done']).nullable().optional(), startDate: date.nullable().optional(), dueDate: date.nullable().optional(), currentSituation: z.string().max(10000).optional(), nextStep: z.string().max(10000).optional(), completedAt: timestamp.nullable().optional(), updates: z.array(z.object({ id: z.string().min(1), content: z.string().max(10000), createdAt: timestamp }).strict()).optional() }).strict(),
 ]) }).strict();
 export const syncBatchSchema = z.object({ requestId, entries: z.array(z.object({ id: z.string().uuid(), expectedVersion: z.number().int().min(0), item: syncSchema.shape.item.nullable() }).strict()).min(2).max(32) }).strict();
 
 export function syncItem(input, previous, references = []) {
   const item = { ...input.item, tags: cleanTags(input.item.tags) };
+  if (item.type === 'todo' && item.urgent && item.pinned === false) item.pinned = true;
+  if (item.type === 'todo' && previous?.urgent && !item.urgent && item.pinned === undefined) item.pinned = true;
   if (item.id !== input.id || item.type !== 'project' && !item.title.trim()) throw new ApiError(400, 'INVALID_INPUT', '同步事项内容无效。');
   const returning = previous?.type === 'todo' && !previous.done && item.type === 'note' && item.returnedFromTodo === true && !item.done;
   if (previous && (item.type !== previous.type && !returning || item.createdAt !== previous.createdAt)) throw new ApiError(400, 'IMMUTABLE_FIELD', '同步不能改变原记录的分类或创建时间。');
@@ -83,6 +86,8 @@ export function makeItem(input) {
 export function patchItem(item, fields, references = []) {
   if (Object.hasOwn(fields, 'urgent') && item.type !== 'todo' || Object.hasOwn(fields, 'targetDate') && item.type !== 'importantDate') throw new ApiError(400, 'INVALID_INPUT', '该分类不支持这些字段。');
   const next = { ...fields };
+  // 单独撤销紧急标记保留普通置顶，包括原来只有 urgent 的旧待办。
+  if (fields.urgent === true || (fields.urgent === false && item.urgent)) next.pinned = true;
   if (next.title !== undefined) { next.title = next.title.trim(); if (!next.title && item.type !== 'project') throw new ApiError(400, 'INVALID_INPUT', '事项名称不能为空。'); }
   if (next.tags) next.tags = cleanTags(next.tags);
   const changed = Object.keys(next).some(key => JSON.stringify(item[key]) !== JSON.stringify(next[key]));
@@ -108,6 +113,8 @@ function cleanTags(values) {
 
 export function patchProject(item, fields) {
   const next = { ...fields };
+  // 单独撤销紧急标记保留普通置顶，包括原来只有 urgent 的旧待办。
+  if (fields.urgent === true || (fields.urgent === false && item.urgent)) next.pinned = true;
   if (next.tags) next.tags = cleanTags(next.tags);
   // 沿用 updateProject：仅实际变化写入，只有“当前情况”变化才追加历史。
   const result = updateProject(item, next);

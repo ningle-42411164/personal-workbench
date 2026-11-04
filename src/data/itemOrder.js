@@ -1,6 +1,17 @@
 import { generateKeyBetween } from 'fractional-indexing';
+// 旧待办可能只有 urgent。直接推导有效置顶，无须为读取旧数据创建同步操作。
+export function isPinned(item) {
+  return item.pinned === true || (item.type === 'todo' && item.urgent === true);
+}
+export function togglePin(item) {
+  const next = { ...item, pinned: !isPinned(item) };
+  if (item.type === 'todo' && item.urgent) next.urgent = false;
+  return next;
+}
 export function subgroup(item) {
-  return item.type === 'project' ? (item.status === 'paused' ? 2 : 0) + (item.pinned ? 0 : 1) : 0;
+  if (item.type === 'project') return (item.status === 'paused' ? 2 : 0) + (item.pinned ? 0 : 1);
+  if (item.type === 'todo') return item.urgent ? 0 : item.pinned ? 1 : 2;
+  return item.pinned ? 0 : 1;
 }
 // 老备份按创建时间及稳定 ID 回退。手动排序只改 rank，不改业务时间或项目历史。
 export const rankOf = item => item.rank ?? -Date.parse(item.createdAt);

@@ -105,7 +105,7 @@ export function validateWorkbenchData(data) {
         throw new Error(`${position}的随笔转换信息不完整。`);
       }
     }
-    if (item.rank !== undefined && !Number.isFinite(item.rank) || item.pinned !== undefined && (item.type !== 'project' || typeof item.pinned !== 'boolean') || item.returnedFromTodo !== undefined && (item.type !== 'note' || item.returnedFromTodo !== true)) throw new Error('无效的排序或退回标记。');
+    if (item.rank !== undefined && !Number.isFinite(item.rank) || item.pinned !== undefined && (item.type === 'routine' || typeof item.pinned !== 'boolean') || item.returnedFromTodo !== undefined && (item.type !== 'note' || item.returnedFromTodo !== true)) throw new Error('无效的排序或退回标记。');
     if (ids.has(item.id)) {
       throw new Error(`备份中存在重复 ID：${item.id}`);
     }
@@ -154,6 +154,7 @@ export function createTodo(title, urgent, now = new Date().toISOString()) {
   return {
     ...createBaseItem('todo', title, now),
     urgent,
+    ...(urgent ? { pinned: true } : {}),
     done: false,
     completedAt: null,
   };
