@@ -22,24 +22,49 @@ const remaining = item => daysUntil(item.targetDate, props.today);
       <button type="button" class="day-name" :aria-expanded="detail === item.id" @click="detail = detail === item.id ? null : item.id">{{ item.title }}</button>
       <time :datetime="item.targetDate">{{ item.targetDate }}</time>
       <small>{{ remaining(item) > 0 ? '还有' : remaining(item) < 0 ? '已过' : '今天' }}</small>
-      <div><b>{{ Math.abs(remaining(item)) }}</b> 天</div>
+      <div class="days"><b>{{ Math.abs(remaining(item)) }}</b><span>天</span></div>
       <span v-if="item.priority" class="urgent-mark">优先处理</span><span v-for="tag in item.tags" :key="tag" class="project-user-tag">#{{ tag.replace(/^#+/, '') }}</span>
       <button v-if="detail === item.id" type="button" class="text-button danger" :disabled="!canEdit" @click="$emit('delete',item.id)">删除</button>
-      <template v-if="stacked"><button class="prev" aria-label="上一个重要日" @click="select(relative(-1))">‹</button><button class="next" aria-label="下一个重要日" @click="select(relative(1))">›</button></template>
+      <template v-if="stacked"><button class="prev" aria-label="上一个重要日" @click="select(relative(-1))"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button><button class="next" aria-label="下一个重要日" @click="select(relative(1))"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button></template>
     </article>
     <small v-if="stacked" class="page">{{ index + 1 }} / {{ items.length }}</small>
   </div>
 </template>
 <style scoped>
-.deck-heading,.peek { display:flex;justify-content:space-between;align-items:center;gap:8px }
-.deck-heading { margin-bottom:14px }
-.pair { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px }
-.day-face,.peek { background:#eff5ef;color:#243d36;border:1px solid #cbd8ce;border-radius:15px;overflow-wrap:anywhere }
-.day-face { position:relative;padding:16px;text-align:left;min-width:0 }
-.pair .day-face { padding:12px;min-height:min(40vw,180px) }
-.day-name { display:block;padding:0;background:transparent;color:inherit;font-size:18px;text-align:inherit;white-space:normal;overflow-wrap:anywhere }
-.day-face time,.day-face small { display:block }.day-face small { margin-top:14px }.day-face b { font-size:clamp(28px,8vw,42px) }
-.peek { min-height:48px;border-radius:14px 14px 0 0;padding:8px 12px;text-align:left;width:calc(100% - 28px);margin:auto }.peek:nth-child(2) { width:calc(100% - 14px) }.peek time { flex:none;font-size:12px }
-.stack .day-face { min-height:230px;text-align:center;padding:24px 48px }.stack .day-name { margin:auto }
-.prev,.next { position:absolute;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:50%;background:#dce9df;color:#214738;padding:0;font-size:24px }.prev {left:2px}.next {right:2px}.page {display:block;text-align:center;margin-top:12px}
+.day-deck {
+  --date-ink:#243d36; --date-muted:#65766e; --date-accent:#244d43; --date-border:#c7d5c9;
+  --date-front-start:#dfe9df; --date-front-end:#f0f2e8; --date-back:#f6f8f3; --date-middle:#edf3e9;
+}
+.day-face,.peek { box-sizing:border-box; min-width:0; border:1px solid var(--date-border); color:var(--date-ink); overflow-wrap:anywhere; }
+.day-face { position:relative; min-height:164px; padding:16px; border-radius:14px; text-align:left; background:linear-gradient(135deg,var(--date-front-start),var(--date-front-end)); }
+.day-name { display:block; max-width:100%; padding:0; color:inherit; background:transparent; font-size:1.0625rem; line-height:1.35; text-align:inherit; overflow-wrap:anywhere; }
+.day-face time,.day-face small { display:block; margin:0; color:var(--date-muted); font-size:.75rem; }
+.day-face time { margin-top:5px; }
+.day-face small { margin-top:16px; }
+.days { display:flex; align-items:baseline; gap:5px; color:var(--date-accent); font-size:.875rem; }
+.days b { font-size:2.125rem; line-height:1.2; }
+.day-face .project-user-tag { max-width:100%; white-space:normal; overflow-wrap:anywhere; }
+.pair { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.pair .day-face { display:flex; flex-direction:column; align-items:flex-start; min-height:158px; padding:12px; }
+/* 方形参照只规定行的最小尺寸，长内容仍可把同一行的两张卡一起撑高。 */
+.pair::before { content:""; grid-area:1 / 1; aspect-ratio:1; width:100%; pointer-events:none; }
+.pair .day-face:first-child { grid-area:1 / 1; }
+.pair .day-name { font-size:.875rem; }
+.pair .day-face small { margin-top:auto; padding-top:12px; }
+.pair .days b { font-size:1.875rem; }
+@media(max-width:360px) { .pair { gap:8px; } .pair .day-face { padding:10px; } }
+/* 标题条参与正常排版；名称增高时，完整前卡随之下移。 */
+.peek { display:flex; align-items:center; justify-content:space-between; gap:8px; width:calc(100% - 28px); min-height:48px; margin:0 auto; padding:9px 12px; border-radius:13px 13px 0 0; border-bottom:0; text-align:left; background:var(--date-back); font-size:.8125rem; }
+.peek:nth-child(2) { width:calc(100% - 14px); background:var(--date-middle); }
+.peek span { min-width:0; }
+.peek time { flex:none; color:var(--date-muted); font-size:.6875rem; }
+.stack .day-face { min-height:230px; padding:22px 49px 20px; text-align:center; }
+.stack .day-name { margin:0 auto; font-size:1.125rem; }
+.stack .day-face small { margin-top:24px; }
+.stack .days { justify-content:center; }
+.stack .days b { font-size:2.625rem; }
+.prev,.next { position:absolute; top:50%; transform:translateY(-50%); display:grid; place-items:center; width:44px; height:44px; min-height:0; padding:0; border-radius:50%; background:white; color:var(--date-accent); box-shadow:0 2px 9px #243d3610; }
+.prev { left:8px; } .next { right:8px; }
+.prev svg,.next svg { display:block; width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+.page { display:block; margin:14px 0 0; color:var(--date-muted); font-size:.75rem; text-align:center; }
 </style>
