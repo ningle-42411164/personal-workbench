@@ -53,27 +53,32 @@ input:focus, select:focus { border-color: #244d43; }
 .project-choice-list input[type=checkbox] { width: 18px; height: 18px; }
 .section-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
 .date-form { margin: 12px 0 18px; }
-.date-section > .category-heading { margin-bottom:16px; }
+.date-section > .category-heading { margin-bottom:8px; }
 .date-section .empty { margin: 0; }
 .category-row time { color: #65766e; font-size: 12px; }
 /* 中间列允许缩到 0，再让长名称换行；否则 Grid 默认最小宽度可能把窄屏撑出横向滚动。 */
-.todo-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid #edf0eb; }
-.todo-check { display: grid; place-items: center; width: 44px; height: 44px; cursor: pointer; }
+.todo-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid #edf0eb; }
+.todo-summary { grid-area:1 / 2; min-width:0; }
+.todo-row > .item-pin-slot { grid-area:1 / 3; }
+.todo-check { grid-area:1 / 1; display: grid; place-items: center; width: 44px; height: 44px; cursor: pointer; }
 .todo-row input { margin: 0; }
-.todo-title { min-width: 0; padding: 4px 0; text-align: left; background: transparent; color: inherit; white-space: normal; overflow-wrap: anywhere; }
+.todo-title { width:100%; min-width: 0; padding: 4px 0; text-align: left; background: transparent; color: inherit; white-space: normal; overflow-wrap: anywhere; }
 .todo-title:hover { text-decoration: underline; text-underline-offset: 3px; }
 .todo-created { color: #748079; font-size: 12px; font-weight: 400; overflow-wrap: anywhere; }
-.todo-detail { grid-column: 2 / -1; color: #65766e; font-size: 13px; line-height: 1.6; }
+.todo-detail { grid-area:2 / 2 / auto / -1; min-width:0; color: #65766e; font-size: 13px; line-height: 1.6; }
 .urgent-mark { color: #8b4f2b; background: #f4e8dc; border-radius: 999px; font-size: 12px; padding: 4px 8px; white-space: nowrap; }
 .inline-urgent { display:inline-block; margin-inline-start:0.35em; padding:1px 5px; vertical-align:baseline; }
-.todo-status { display: flex; justify-self: end; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+.todo-status { display: flex; justify-content: flex-start; flex-wrap: wrap; gap: 6px; }
 .completed .todo-title { text-decoration: line-through; color: #748079; }
 .category-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 .category-heading h2 { margin: 0; }
 .category-expand { display: flex; flex: 1; align-items: center; gap: 4px; min-width: 0; min-height: 36px; padding: 4px 0; background: transparent; color: inherit; font-size: 18px; font-weight: 700; text-align: left; }
 .category-expand small { font-size: 14px; }
 .fold-mark { display: inline-block; width: 14px; margin-right: 4px; color: inherit; font-size: 18px; font-weight: 700; line-height: 1; text-align: center; }
-.category-row { border-top: 1px solid #edf0eb; padding: 12px 0; overflow-wrap: anywhere; }
+.category-row { display:grid; grid-template-columns:minmax(0,1fr) 44px; column-gap:8px; border-top: 1px solid #edf0eb; padding: 12px 0; overflow-wrap: anywhere; }
+.category-row > .item-line { grid-area:1 / 1; }
+.category-row > .project-next-step { grid-area:2 / 1; }
+.category-row > .item-pin-slot { grid-area:1 / 2 / span 2; align-self:center; }
 .category-row p { margin: 0 0 8px; }
 .category-title { display: block; width: 100%; margin: 0 0 8px; padding: 0; background: transparent; color: inherit; text-align: left; white-space: pre-wrap; }
 .item-line { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 6px 8px; margin-bottom: 8px; }
@@ -164,8 +169,6 @@ footer { margin-top: 28px; font-size: 13px; line-height: 1.7; }
   .project-dialog .project-field-value, .project-dialog .project-field-editor { grid-column: 1; }
   main { padding: 28px 14px 48px; }
   .panel { padding: 16px; }
-  .todo-row { grid-template-columns: 44px minmax(0, 1fr); }
-  .todo-status { grid-column: 2; }
   header h1 { font-size: 32px; }
   .project-date-fields { grid-template-columns: 1fr; gap: 0; }
   .project-field-row { grid-template-columns: minmax(0, 1fr) 28px; gap: 2px 8px; }

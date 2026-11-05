@@ -17,10 +17,14 @@ const remaining = item => daysUntil(item.targetDate, props.today);
   <p v-if="!items.length" class="empty">还没有重要日，选一个值得记住的日期吧。</p>
   <div v-else :class="['day-deck', { pair: items.length === 2, stack: stacked }]">
     <template v-if="stacked">
-      <button v-for="delta in [1,2]" :key="relative(delta).id" type="button" class="peek" @click="select(relative(delta))"><span>{{ relative(delta).title }}<PinnedMark :item="relative(delta)" /></span><time>{{ relative(delta).targetDate }}</time></button>
+      <div v-for="delta in [1,2]" :key="relative(delta).id" class="peek">
+        <button type="button" class="peek-select" @click="select(relative(delta))"><span>{{ relative(delta).title }}</span><time>{{ relative(delta).targetDate }}</time></button>
+        <PinnedMark :item="relative(delta)" />
+      </div>
     </template>
     <article v-for="item in visible" :key="item.id" class="day-face">
-      <button type="button" class="day-name" :aria-expanded="detail === item.id" @click="detail = detail === item.id ? null : item.id">{{ item.title }}<PinnedMark :item="item" /></button>
+      <button type="button" class="day-name" :aria-expanded="detail === item.id" @click="detail = detail === item.id ? null : item.id">{{ item.title }}</button>
+      <PinnedMark :item="item" />
       <time :datetime="item.targetDate">{{ item.targetDate }}</time>
       <small>{{ remaining(item) > 0 ? '还有' : remaining(item) < 0 ? '已过' : '今天' }}</small>
       <div class="days"><b>{{ Math.abs(remaining(item)) }}</b><span>天</span></div>
@@ -55,9 +59,12 @@ const remaining = item => daysUntil(item.targetDate, props.today);
 .pair .days b { font-size:1.875rem; }
 @media(max-width:360px) { .pair { gap:8px; } .pair .day-face { padding:10px; } }
 /* 标题条参与正常排版；名称增高时，完整前卡随之下移。 */
-.peek { display:flex; align-items:center; justify-content:space-between; gap:8px; width:calc(100% - 28px); min-height:48px; margin:0 auto; padding:9px 12px; border-radius:13px 13px 0 0; border-bottom:0; text-align:left; background:var(--date-fill); font-size:.8125rem; }
+.peek { display:flex; align-items:center; gap:8px; width:calc(100% - 28px); min-height:48px; margin:0 auto; padding:0; border-radius:13px 13px 0 0; border-bottom:0; text-align:left; background:var(--date-fill); font-size:.8125rem; }
 .peek:nth-child(2) { width:calc(100% - 14px); }
-.peek span { min-width:0; }
+.peek-select { display:flex; align-items:center; justify-content:space-between; gap:8px; flex:1; min-width:0; align-self:stretch; padding:9px 0 9px 12px; color:inherit; font:inherit; text-align:left; background:transparent; overflow-wrap:anywhere; }
+.peek-select span { min-width:0; }
+.day-face > .item-pin-slot { position:absolute; top:0; right:0; }
+.day-deck:not(.stack) .day-name { max-width:calc(100% - 36px); }
 .peek time { flex:none; color:var(--date-muted); font-size:.6875rem; }
 .stack .day-face { min-height:230px; padding:22px 49px 20px; text-align:center; }
 .stack .day-name { margin:0 auto; font-size:1.125rem; }

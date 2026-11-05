@@ -57,10 +57,13 @@ onBeforeUnmount(() => emit('editing', props.item.id, null));
     <label class="todo-check">
       <input type="checkbox" :checked="Boolean(item.done)" :disabled="!canEdit || editing" :aria-label="`${item.done ? '恢复' : '完成'} ${item.title}`" @change.stop="emit('complete')">
     </label>
-    <button type="button" class="todo-title" :disabled="saving" :aria-expanded="expanded" @click="toggleDetail">
-      <span :class="{ 'note-struck': item.convertedToId }">{{ item.title }}</span><PinnedMark :item="item" /><span v-if="item.urgent" class="urgent-mark inline-urgent">急需处理</span><span v-for="tag in item.tags" :key="tag" class="project-user-tag">#{{ tag.replace(/^#+/, '') }}</span><span v-if="item.convertedToId" class="recorded-mark">已录入</span><span v-if="ellipsis" class="more-ellipsis" aria-hidden="true">……</span><time v-if="expanded" class="todo-created" :datetime="item.createdAt">（创建于 {{ formatTime(item.createdAt) }}）</time><time v-if="item.done" class="todo-created" :datetime="item.completedAt">（完成于 {{ formatTime(item.completedAt) }}）</time>
-    </button>
-    <div v-if="item.priority === true" class="todo-status"><span v-if="item.priority === true" class="urgent-mark">优先处理</span></div>
+    <div class="todo-summary">
+      <button type="button" class="todo-title" :disabled="saving" :aria-expanded="expanded" @click="toggleDetail">
+        <span :class="{ 'note-struck': item.convertedToId }">{{ item.title }}</span><span v-if="item.urgent" class="urgent-mark inline-urgent">急需处理</span><span v-for="tag in item.tags" :key="tag" class="project-user-tag">#{{ tag.replace(/^#+/, '') }}</span><span v-if="item.convertedToId" class="recorded-mark">已录入</span><span v-if="ellipsis" class="more-ellipsis" aria-hidden="true">……</span><time v-if="expanded" class="todo-created" :datetime="item.createdAt">（创建于 {{ formatTime(item.createdAt) }}）</time><time v-if="item.done" class="todo-created" :datetime="item.completedAt">（完成于 {{ formatTime(item.completedAt) }}）</time>
+      </button>
+      <div v-if="item.priority === true" class="todo-status"><span v-if="item.priority === true" class="urgent-mark">优先处理</span></div>
+    </div>
+    <PinnedMark :item="item" />
     <div v-if="expanded" class="todo-detail">
       <form v-if="editing" class="ordinary-name-editor" @submit.prevent="saveName">
         <input ref="inputControl" v-model="draft" aria-label="事项名称" maxlength="150" :disabled="!canEdit">
