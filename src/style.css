@@ -75,18 +75,16 @@ input:focus, select:focus { border-color: #244d43; }
 .category-expand { display: flex; flex: 1; align-items: center; gap: 4px; min-width: 0; min-height: 36px; padding: 4px 0; background: transparent; color: inherit; font-size: 18px; font-weight: 700; text-align: left; }
 .category-expand small { font-size: 14px; }
 .fold-mark { display: inline-block; width: 14px; margin-right: 4px; color: inherit; font-size: 18px; font-weight: 700; line-height: 1; text-align: center; }
-.category-row { display:grid; grid-template-columns:minmax(0,1fr) 44px; column-gap:8px; border-top: 1px solid #edf0eb; padding: 12px 0; overflow-wrap: anywhere; }
-.category-row > .item-line { grid-area:1 / 1; }
-.category-row > .project-next-step { grid-area:2 / 1; }
-.category-row > .item-pin-slot { grid-area:1 / 2 / span 2; align-self:center; }
+.category-row { border-top: 1px solid #edf0eb; padding: 12px 0; overflow-wrap: anywhere; }
+.project-heading-row { display:grid; grid-template-columns:minmax(0,1fr) 44px; column-gap:8px; align-items:center; margin-bottom:8px; }
 .category-row p { margin: 0 0 8px; }
 .category-title { display: block; width: 100%; margin: 0 0 8px; padding: 0; background: transparent; color: inherit; text-align: left; white-space: pre-wrap; }
-.item-line { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 6px 8px; margin-bottom: 8px; }
+.item-line { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 6px 8px; }
 .item-line .category-title { flex: 1 1 180px; min-width: 0; width: auto; margin: 0; }
 .item-status { align-self: flex-start; margin-left: auto; }
 .project-user-tag { display: inline-block; margin-left: 6px; color: #65766e; font-size: 13px; font-weight: 400; }
 .completed-project { border-left: 2px solid #cbd8ce; padding-left: 12px; }
-.completed-project > .item-line .category-title { color: #65766e; }
+.completed-project .project-heading-row .category-title { color: #65766e; }
 .project-detail { min-width: 0; margin-top: 12px; padding: 14px; border: 1px solid #dfe5df; border-radius: 10px; background: #f8faf7; font-size: 13px; overflow-wrap: anywhere; }
 /* 原生顶层模态不占列表高度；动态视口限制卡片，长字段与历史在卡片内部滚动。 */
 .project-dialog { width: min(680px, calc(100vw - 28px)); max-width: none; max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); margin: auto; padding: 20px; border: 1px solid #dfe5df; border-radius: 16px; color: #243d36; background: #fff; overflow: auto; overscroll-behavior: contain; box-shadow: 0 20px 80px #17382d40; }

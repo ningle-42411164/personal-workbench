@@ -603,9 +603,11 @@ async function confirmImport() {
       <p v-if="showProjects && !projects.length" class="empty">还没有项目</p>
       <SortList v-if="sorting === 'project'" :items="sortRows('project')" @move="moveRow" @pin="pinRow" @exit="sorting=null" />
       <article v-else v-for="(item, index) in visibleProjects" :key="item.id" class="category-row" :class="{paused:item.status==='paused'}">
-        <div class="item-line"><button type="button" class="category-title project-list-trigger" :aria-label="item.title ? undefined : '打开空名称项目详情'" :aria-expanded="selectedProjectId === item.id" @click="toggleProjectDetails(item.id)">{{ item.title }}<span v-for="tag in item.tags" :key="tag" class="project-user-tag">#{{ tag.replace(/^#+/, '') }}</span><span v-if="!showProjects && projects.length > 2 && index === 1" class="more-ellipsis" aria-hidden="true">……</span></button><span v-if="item.priority === true" class="urgent-mark item-status">优先处理</span></div>
-        <p class="project-next-step">{{ item.nextStep }}</p>
+        <div class="project-heading-row">
+          <div class="item-line"><button type="button" class="category-title project-list-trigger" :aria-label="item.title ? undefined : '打开空名称项目详情'" :aria-expanded="selectedProjectId === item.id" @click="toggleProjectDetails(item.id)">{{ item.title }}<span v-for="tag in item.tags" :key="tag" class="project-user-tag">#{{ tag.replace(/^#+/, '') }}</span><span v-if="!showProjects && projects.length > 2 && index === 1" class="more-ellipsis" aria-hidden="true">……</span></button><span v-if="item.priority === true" class="urgent-mark item-status">优先处理</span></div>
           <PinnedMark :item="item" />
+        </div>
+        <p class="project-next-step">{{ item.nextStep }}</p>
       </article>
     </section>
     <section v-else class="panel">
@@ -645,9 +647,11 @@ async function confirmImport() {
         <p v-if="!completedCount" class="empty">还没有已完成的事项。</p>
         <OrdinaryItem v-for="task in completedTodos" :key="task.id" :id="'completed-' + task.id" :class="{ located:highlighted === task.id }" :ref="el=>registerEditor(task.id,el)" :item="task" :can-edit="canEditLocal" :expanded="selectedTodoId === task.id" :save-item="saveOrdinaryItem" @editing="protectOrdinary" @expand="expandOrdinary(task)" @complete="toggleTask(task.id)" @delete="deleteItem(task.id)" />
         <article v-for="item in completedProjects" :key="item.id" :id="'completed-' + item.id" :class="{ located:highlighted === item.id }" class="category-row completed-project">
-          <div class="item-line"><button type="button" class="category-title project-list-trigger" :aria-label="item.title ? undefined : '打开已完成的空名称项目详情'" :aria-expanded="selectedProjectId === item.id" @click="toggleProjectDetails(item.id)">{{ item.title }}<span v-for="tag in item.tags" :key="tag" class="project-user-tag">#{{ tag.replace(/^#+/, '') }}</span></button><span v-if="item.priority === true" class="urgent-mark item-status">优先处理</span></div>
+          <div class="project-heading-row">
+            <div class="item-line"><button type="button" class="category-title project-list-trigger" :aria-label="item.title ? undefined : '打开已完成的空名称项目详情'" :aria-expanded="selectedProjectId === item.id" @click="toggleProjectDetails(item.id)">{{ item.title }}<span v-for="tag in item.tags" :key="tag" class="project-user-tag">#{{ tag.replace(/^#+/, '') }}</span></button><span v-if="item.priority === true" class="urgent-mark item-status">优先处理</span></div>
+            <PinnedMark :item="item" />
+          </div>
           <p class="project-next-step">{{ item.nextStep }}</p>
-          <PinnedMark :item="item" />
         </article>
       </div>
     </section>
