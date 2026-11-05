@@ -386,3 +386,76 @@ test('七类置顶通过存储与另一设备拉取；旧紧急、单撤紧急�
     } else assert.equal(row.pinned,true);
   }
 });
+
+test('同 ID 移动通过真实同步接口：失败保留随笔，回执丢失、跨端及返回后可继续操作', async t => {
+  const { moveNote } = await import('../src/data/workbenchData.js');
+  const { returnTodo } = await import('../src/data/itemOrder.js');
+  const note = { ...createNote('同名长标题', at), tags:['学习'], rank:31 };
+  const s = fixture(t, [note]); await s.engine.run();
+  const initial = await s.store.read();
+  assert.throws(() => moveNote([note], note.id, 'importantDate', '2026-02-31'));
+  await assert.rejects(s.store.save(data(moveNote([note], note.id, 'todo')), initial.revision-1));
+  assert.deepEqual((await s.store.read()).data.items, [note]);
+  const [target] = moveNote([note], note.id, 'todo');
+  await assert.rejects(s.service.sync({id:note.id, item:target, expectedVersion:1, requestId:'move-missing-discriminator'}));
+  await assert.rejects(s.service.sync({id:note.id, moveFrom:'note', item:{...target,title:'伪造的移动标题'}, expectedVersion:1, requestId:'move-forged-fields'}),error=>error.code==='INVALID_MOVE');
+  await save(s, rows => moveNote(rows, note.id, 'todo'));
+  s.controls.loseReply = true;
+  await s.engine.run(); await s.engine.run();
+  assert.equal(s.controls.writes.at(-1),s.controls.writes.at(-2));
+  const stored = await s.service.getItem({id:note.id});
+  assert.equal(stored.version,2); assert.equal(stored.item.type,'todo');
+  assert.equal(stored.item.createdAt,note.createdAt); assert.deepEqual(stored.item.tags,note.tags);
+  assert.notEqual(stored.item.rank,note.rank);
+  assert.equal((await s.service.list({includeCompleted:true})).items.length,1);
+  const other = createSyncStore({indexedDB:new IDBFactory(),storage:{getItem:()=>null}});
+  const peer = createSyncEngine({store:other,api:s.api,schedule:()=>1,cancel:()=>{}});
+  t.after(async()=>{peer.stop(); await other.close()});
+  await other.setEnabled(true); await peer.run();
+  assert.deepEqual((await other.read()).data.items,[stored.item]);
+  await save(s,rows=>returnTodo(rows,note.id)); await s.engine.run(); await peer.run();
+  assert.equal((await other.read()).data.items[0].type,'note');
+  await save(s,rows=>moveNote(rows,note.id,'waiting'));
+  await s.service.patchItem({id:note.id,expectedVersion:3,requestId:'move-competing-edit',fields:{title:'云端另改'}});
+  await s.engine.run();
+  const conflict=await s.store.read();
+  assert.equal(conflict.data.items[0].type,'waiting');
+  assert.equal(conflict.blocked[note.id].remote.item.title,'云端另改');
+});
+
+test('新 MCP 录入返回唯一目标，旧工具回执仍为原双记录；中途 SQL 失败不留下部分成功', async t => {
+  const first=createNote('新协议',at), old=createNote('旧协议',at), s=fixture(t,[first,old]); await s.engine.run();
+  const client=await fixtureMcpClient(s.service);t.after(()=>client.close());
+  const call=async(name,args)=>{const result=await client.callTool({name,arguments:args});assert.notEqual(result.isError,true,JSON.stringify(result));return result.structuredContent;};
+  const legacy={id:old.id,targetType:'shopping',expectedVersion:1,requestId:'legacy-in-flight'};
+  const receipt=await call('convert_note',legacy);
+  assert.equal(receipt.records.length,2);
+  const args={id:first.id,targetType:'project',mode:'move',expectedVersion:1,requestId:'new-mcp-move'};
+  const batch=s.db.batch.bind(s.db);
+  s.db.batch=stmts=>batch([...stmts,s.db.prepare('INSERT INTO nonexistent_fixture_table VALUES (1)')]);
+  await assert.rejects(s.service.convertNote(args));
+  assert.equal((await s.service.getItem({id:first.id})).item.type,'note');s.db.batch=batch;
+  const moved=await call('convert_note',args);assert.equal(moved.records.length,1);
+  const target=moved.records[0];assert.equal(target.item.id,first.id);assert.equal(target.item.updates.length,1);
+  assert.deepEqual(await call('convert_note',args),moved);
+  assert.deepEqual(await call('convert_note',legacy),receipt);
+  await call('update_project',{id:first.id,expectedVersion:2,requestId:'moved-complete',fields:{status:'done'}});
+  await call('delete_item',{id:first.id,expectedVersion:3,requestId:'moved-remove'});
+  await s.engine.run();const remaining=(await s.store.read()).data;
+  validateWorkbenchData(remaining);assert.equal(remaining.items.length,2);
+  assert.equal(remaining.items.find(x=>x.id===old.id).convertedToId,receipt.records[1].item.id);
+});
+
+test('移动后在补传前继续编辑，先按基准移动再提交本机草稿',async t=>{
+  const {moveNote}=await import('../src/data/workbenchData.js');
+  const note=createNote('来源标题',at), s=fixture(t,[note]);await s.engine.run();
+  await save(s,rows=>moveNote(rows,note.id,'project'));
+  await save(s,rows=>rows.map(row=>({...row,title:'继续修改',nextStep:'下一步'})));
+  await s.engine.run();
+  const record=await s.service.getItem({id:note.id});
+  assert.equal(record.version,3);assert.equal(record.item.nextStep,'下一步');
+  const requests=s.controls.writes.slice(-2).map(raw=>JSON.parse(raw));
+  assert.equal(requests[0].moveFrom,'note');assert.equal(requests[0].item.title,'来源标题');
+  assert.equal(requests[1].item.title,'继续修改');assert.equal(requests[1].moveFrom,undefined);
+  assert.deepEqual((await s.store.read()).dirty,{});
+});

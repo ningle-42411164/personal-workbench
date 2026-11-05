@@ -1,4 +1,4 @@
-import { STORAGE_KEY, emptyWorkbenchData, validateWorkbenchData, removeItem } from '../data/workbenchData.js';
+import { STORAGE_KEY, emptyWorkbenchData, validateWorkbenchData, removeItem, initialMoveSnapshot, canMoveNote } from '../data/workbenchData.js';
 import { isKnownTestRecord } from './knownTestRecords.js';
 import { PHONE_ENROLLMENT_VERSION } from './ownerPhone.js';
 
@@ -9,6 +9,12 @@ const ordered = value => Array.isArray(value) ? value.map(ordered) : value && ty
   ? Object.fromEntries(Object.keys(value).sort().map(key => [key, ordered(value[key])])) : value;
 export const equal = (a, b) => JSON.stringify(ordered(a)) === JSON.stringify(ordered(b));
 const currentItem = (state, id) => state.data.items.find(item => item.id === id) ?? null;
+function syncEntry(id, version, base, item) {
+  if (canMoveNote(base, item?.type)) {
+    return { id, expectedVersion:version, moveFrom:'note', item:initialMoveSnapshot(base, item) };
+  }
+  return { id, expectedVersion:version, item:copy(item) };
+}
 function putItem(state, item, id) {
   state.data.items = item ? [...state.data.items.filter(value => value.id !== id), item]
     : state.data.items.some(value => value.id === id) ? removeItem(state.data.items, id) : state.data.items;
@@ -162,7 +168,7 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
               state.blocked[id] = { kind: 'rejected', code: 'LOCAL_REFERENCE', message: '关联目标属于隔离记录或本机保留副本，关联双方保留，暂不上传。' }; continue;
             }
             if (ids.some(key => state.blocked[key])) continue;
-            const entries = ids.filter(key => state.bindings[key].version > 0 || currentItem(state, key)).map(key => ({ id: key, expectedVersion: state.bindings[key].version, item: copy(currentItem(state, key)) }));
+            const entries = ids.filter(key => state.bindings[key].version > 0 || currentItem(state, key)).map(key => syncEntry(key, state.bindings[key].version, state.bindings[key].base, currentItem(state, key)));
             if (entries.length > 32) { state.blocked[id] = { kind: 'rejected', code: 'GROUP_TOO_LARGE', message: '关联组超过一次提交上限，原内容保留。' }; continue; }
             if (entries.length > 1) {
               const job = { id, requestId: uuid(), entries };
@@ -170,7 +176,7 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
               return job;
             }
           }
-          const job = { id, requestId: uuid(), expectedVersion: binding.version, item: item ? copy(item) : null };
+          const job = { ...syncEntry(id, binding.version, binding.base, item), requestId: uuid() };
           state.outbox[id] = job; return job;
         }
         return null;
@@ -290,7 +296,7 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
         if (records.some(remote => remote.deleted && !remote.missing && currentItem(state, remote.id))) throw new Error('云端已删除此 ID，不能直接覆盖删除标记。双方内容仍保留，尚未解决。');
         const entries = records.flatMap(remote => {
           const key = remote.item?.id ?? remote.id, item = currentItem(state, key);
-          return !item && remote.deleted ? [] : [{ id: key, expectedVersion: remote.version, item: copy(item) }];
+          return !item && remote.deleted ? [] : [syncEntry(key, remote.version, remote.item, item)];
         });
         if (!entries.length) throw new Error('双方均已删除，请采用云端确认删除结果。');
         const job = entries.length > 1 ? { id: entries[0].id, requestId: uuid(), entries } : { ...entries[0], requestId: uuid() };

@@ -1,8 +1,10 @@
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useRegisterSW } from 'virtual:pwa-register/vue';
 import LaunchSplash from './components/LaunchSplash.vue';
 import ImportantDateDeck from './components/ImportantDateDeck.vue';
+import SuccessMessages from './components/SuccessMessages.vue';
+import PinnedMark from './components/PinnedMark.vue';
 import SyncSymbol from './components/SyncSymbol.vue';
 import QuickHelp from './components/QuickHelp.vue';
 import SortList from './components/SortList.vue';
@@ -19,7 +21,7 @@ import { isKnownTestRecord } from './sync/knownTestRecords.js';
 import { useCloudWorkbench } from './cloud/useCloudWorkbench.js';
 import { normalizeUserTags, availableUserTags } from './data/userTags.js';
 import { readSplashEnabled, writeSplashEnabled } from './data/splashPreference.js';
-import { COMPLETABLE_TYPES, convertNote, createImportantDate, createNote, createRoutine, createSimpleItem, createTodo, emptyWorkbenchData, isCalendarDate, readWorkbenchData, removeItem, renameItem, toggleTodo, validateWorkbenchData } from './data/workbenchData.js';
+import { COMPLETABLE_TYPES, moveNote, createImportantDate, createNote, createRoutine, createSimpleItem, createTodo, emptyWorkbenchData, isCalendarDate, readWorkbenchData, removeItem, renameItem, toggleTodo, validateWorkbenchData } from './data/workbenchData.js';
 
 // 只有原首页这一套工作视图；手机更新后按已授权的节点一规则自动纳入待办和项目。
 const cloud = useCloudWorkbench();
@@ -151,8 +153,37 @@ function visibleCategoryItems(type) {
   return expandedCategories.value[type] ? items : [];
 }
 
-const sorting = ref(null), toast = ref('');
-let toastTimer;
+const projectCreate = ref(null);
+const sorting = ref(null), successMessages = ref(null), highlighted = ref(null);
+let highlightTimer;
+const notify = (text, target) => successMessages.value?.push(text, target);
+const creationText = { note:'随笔+1', todo:'待办+1', project:'已创建新项目！' };
+function completedMessage(item, done) {
+  if (done) notify(`已完成「${item.title}」`, { id:item.id, type:item.type });
+  else notify(`已恢复「${item.title}」为未完成`);
+}
+async function locateCompleted(target) {
+  const exists = () => [...completedTodos.value, ...completedProjects.value].some(item => item.id === target.id && item.type === target.type);
+  if (!exists() || !await flushOrdinary()) return;
+  if (addingCategory.value === 'project' && !projectCreate.value?.requestClose()) return;
+  if (editingRoutineId.value) {
+    await saveRoutine();
+    if (editingRoutineId.value) return;
+  }
+  if (selectedProjectId.value) {
+    if (!await projectDialog.value?.saveBeforeLeave()) return;
+    selectedProjectId.value = null;
+  }
+  if (!exists()) return;
+  showCompleted.value = true;
+  await nextTick();
+  const row = document.getElementById('completed-' + target.id);
+  if (!row || !exists()) return;
+  row.scrollIntoView({ block:'center' });
+  highlighted.value = target.id;
+  clearTimeout(highlightTimer);
+  highlightTimer = setTimeout(() => { highlighted.value = null; }, 1000);
+}
 const ordinaryEditors = new Map();
 function registerEditor(id, component) { if(component) ordinaryEditors.set(id,component); else ordinaryEditors.delete(id); }
 async function flushOrdinary(){
@@ -181,15 +212,24 @@ async function toggleSort(type) {
 function sortRows(type){return type==='project'?projects.value:type==='todo'?openTodos.value:type==='importantDate'?importantDates.value:categoryItems(type);}
 async function moveRow(rows,from,to) {
   if (!equal(rows,sortRows(sorting.value))) {message.value='列表已变化，请按最新顺序重新拖动。';return;}
-  try{const rank=moveRank(rows,from,to);if(rank!==null)await saveTasks(workbenchData.value.items.map(x=>x.id===rows[from].id?{...x,...rank}:x));}
-  catch(error){message.value=error.message;}
+  try {
+    const rank = moveRank(rows, from, to);
+    if (!rank) return;
+    const items = workbenchData.value.items.map(item => item.id === rows[from].id ? { ...item, ...rank } : item);
+    if (await saveTasks(items)) notify('排序已更新');
+  } catch (error) { message.value = error.message; }
 }
 async function pinRow(item) {
   const next = togglePin(item);
   next.rank = frontRank(personalItems.value, next);
-  await saveTasks(workbenchData.value.items.map(row => row.id === item.id ? next : row));
+  if (await saveTasks(workbenchData.value.items.map(row => row.id === item.id ? next : row))) notify(next.pinned ? '已置顶' : '已取消置顶');
 }
-async function sendBack(id){if(await saveTasks(returnTodo(workbenchData.value.items,id))){selectedTodoId.value=null;toast.value='已退回随笔';clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.value='',2200);}}
+async function sendBack(id) {
+  if (await saveTasks(returnTodo(workbenchData.value.items, id))) {
+    selectedTodoId.value = null;
+    notify('已退回随笔');
+  }
+}
 let midnightTimer;
 function refreshToday() {
   clearTimeout(midnightTimer);
@@ -205,6 +245,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   // 组件移除时同时清理定时器与 document 监听，避免旧页面逻辑继续运行。
   clearTimeout(midnightTimer);
+  clearTimeout(highlightTimer);
   document.removeEventListener('visibilitychange', refreshToday);
 });
 
@@ -215,8 +256,10 @@ async function toggleProjectDetails(id) {
   selectedProjectId.value = selectedProjectId.value === id ? null : id;
 }
 
-function createFullProject(project) {
-  return saveTasks([...workbenchData.value.items, project]);
+async function createFullProject(project) {
+  const saved = await saveTasks([...workbenchData.value.items, project]);
+  if (saved) notify(creationText.project);
+  return saved;
 }
 
 
@@ -261,6 +304,7 @@ async function addTask() {
   item.tags = normalizeUserTags(quickTags.value);
   // 先生成新数组交给保存入口，只有返回 true 才清空草稿，失败时输入和标签保留。
   if (await saveTasks([...workbenchData.value.items, item])) {
+    if (creationText[item.type]) notify(creationText[item.type]);
     title.value = '';
     quickTags.value = [];
     needProcessing.value = false;
@@ -298,6 +342,7 @@ async function addCategoryItem() {
     ? createNote(categoryTitle.value.trim()) : addingCategory.value === 'todo'
       ? createTodo(categoryTitle.value.trim(), false) : createSimpleItem(addingCategory.value, categoryTitle.value.trim());
   if (await saveTasks([...workbenchData.value.items, item])) {
+    if (creationText[item.type]) notify(creationText[item.type]);
     categoryTitle.value = '';
     addingCategory.value = null;
   }
@@ -311,7 +356,7 @@ function openNoteDetails(item) {
 
 async function saveNoteConversion() {
   try {
-    const nextItems = convertNote(workbenchData.value.items, selectedNoteId.value, conversionType.value, conversionDate.value);
+    const nextItems = moveNote(workbenchData.value.items, selectedNoteId.value, conversionType.value, conversionDate.value);
     if (await saveTasks(nextItems)) selectedNoteId.value = null;
   } catch (error) {
     message.value = error.message;
@@ -319,26 +364,36 @@ async function saveNoteConversion() {
 }
 
 //切换完成状态，id 是操作目标传进来的参数
-function toggleTask(id) {
+async function toggleTask(id) {
   // map 保留非目标记录，只按稳定 ID 更新目标；完成时间由 toggleTodo 与 done 一起计算。
-  saveTasks(workbenchData.value.items.map(item => item.id === id && COMPLETABLE_TYPES.includes(item.type) ? toggleTodo(item) : item));
+  const item = workbenchData.value.items.find(row => row.id === id);
+  if (!item || !COMPLETABLE_TYPES.includes(item.type)) return;
+  const next = toggleTodo(item);
+  if (await saveTasks(workbenchData.value.items.map(row => row.id === id ? next : row))) completedMessage(next, next.done);
 }
 // { ...task }展开task属性；完成状态与完成时间一起改变。
 
-function saveOrdinaryItem(nextItem, editingBase) {
+async function saveOrdinaryItem(nextItem, editingBase) {
   if (editingBase && !equal(workbenchData.value.items.find(item => item.id === nextItem.id), editingBase)) {
     message.value = '此事项在编辑期间发生变化，输入保留，请核对新内容。'; return false;
   }
-  return saveTasks(workbenchData.value.items.map(item => item.id === nextItem.id ? nextItem : item));
+  if (equal(editingBase,nextItem)) return true;
+  const saved = await saveTasks(workbenchData.value.items.map(item => item.id === nextItem.id ? nextItem : item));
+  if (saved) notify('修改已保存到本机');
+  return saved;
 }
 
 // 项目详情只负责生成新记录；沿用页面的“先写入、后更新”保存顺序。
 async function saveProject(nextProject) {
   // find 确认原项目仍存在；详情组件提出新值，由父组件统一负责实际持久化。
   const previous = workbenchData.value.items.find(item => item.id === nextProject.id && item.type === 'project');
-  if (previous && !equal(previous,nextProject)) nextProject = {...nextProject,rank:frontRank(personalItems.value,nextProject)};
+  if (equal(previous,nextProject)) return true;
+  if (previous) nextProject = {...nextProject,rank:frontRank(personalItems.value,nextProject)};
   if (!previous || !await saveTasks(workbenchData.value.items.map(item => item.id === nextProject.id ? nextProject : item))) return false;
-  // 外壳在所有编辑保存成功后决定是否关闭；这里不因状态分组变化提前卸载草稿。
+  if (previous.status !== nextProject.status && (previous.status === 'done' || nextProject.status === 'done')) completedMessage(nextProject, nextProject.status === 'done');
+  else if (previous.status !== 'paused' && nextProject.status === 'paused') notify('项目已暂停');
+  else if (previous.status === 'paused' && nextProject.status === 'active') notify('项目已恢复进行中');
+  else notify('修改已保存到本机');
   return true;
 }
 
@@ -364,7 +419,12 @@ async function saveRoutine() {
       return renameItem(routine, routineTitle.value.trim());
     })
     : [...workbenchData.value.items, createRoutine(routineTitle.value.trim())];
-  if (await saveTasks(nextItems)) closeRoutineForm();
+  const editing = editingRoutineId.value;
+  if (editing && workbenchData.value.items.find(item => item.id === editing)?.title === routineTitle.value.trim()) { closeRoutineForm(); return; }
+  if (await saveTasks(nextItems)) {
+    if (editing) notify('修改已保存到本机');
+    closeRoutineForm();
+  }
 }
 
 async function deleteRoutine(id) {
@@ -380,6 +440,7 @@ async function deleteItem(id) {
   const linkNotice = linkedNote ? '\n关联随笔会恢复为“未录入”，不会被删除。' : '';
   if (!window.confirm(`确定删除${typeLabel}“${item.title}”（创建于 ${new Date(item.createdAt).toLocaleString()}）吗？${linkNotice}\n此操作不能撤销。`)) return false;
   if (!await saveTasks(removeItem(workbenchData.value.items, id))) return false;
+  notify(`已删除「${item.title}」`);
   selectedTodoId.value = null;
   selectedDetailId.value = null;
   selectedProjectId.value = null;
@@ -449,7 +510,7 @@ async function confirmImport() {
 <template>
   <LaunchSplash v-if="showSplash" />
   <main>
-    <div v-if="toast" role="status" class="action-toast">{{ toast }}</div>
+    <SuccessMessages ref="successMessages" @locate="locateCompleted" />
     <header><SyncSymbol :snapshot="syncSnapshot" :status="syncStatus" :auth="cloudState.auth" /><span class="eyebrow">Personal Workbench</span><h1>欢迎回来，从哪里开始干活？</h1></header>
     <div v-if="needRefresh" class="notice">有新版本可用。<button @click="updateServiceWorker()">更新应用</button></div>
     <!-- 原首页继续使用同一个 v2 集合；所有者连接后八类事项由事务队列同步，未连接访客只保存本机。 -->
@@ -538,11 +599,11 @@ async function confirmImport() {
         <SortToggle :active="sorting === 'project'" @click="toggleSort('project')" />
         <button type="button" class="mini-add" :disabled="!canEditLocal" :aria-label="addingCategory === 'project' ? '关闭项目添加' : '添加项目'" @click="openCategoryForm('project')">{{ addingCategory === 'project' ? '×' : '+' }}</button>
       </div>
-      <ProjectCreate v-if="addingCategory === 'project'" :can-edit="canEditLocal" :available-tags="availableProjectTags" :save-project="createFullProject" @close="addingCategory = null" />
+      <ProjectCreate ref="projectCreate" v-if="addingCategory === 'project'" :can-edit="canEditLocal" :available-tags="availableProjectTags" :save-project="createFullProject" @close="addingCategory = null" />
       <p v-if="showProjects && !projects.length" class="empty">还没有项目</p>
       <SortList v-if="sorting === 'project'" :items="sortRows('project')" @move="moveRow" @pin="pinRow" @exit="sorting=null" />
       <article v-else v-for="(item, index) in visibleProjects" :key="item.id" class="category-row" :class="{paused:item.status==='paused'}">
-        <div class="item-line"><button type="button" class="category-title project-list-trigger" :aria-label="item.title ? undefined : '打开空名称项目详情'" :aria-expanded="selectedProjectId === item.id" @click="toggleProjectDetails(item.id)">{{ item.title }}<span v-for="tag in item.tags" :key="tag" class="project-user-tag">#{{ tag.replace(/^#+/, '') }}</span><span v-if="!showProjects && projects.length > 2 && index === 1" class="more-ellipsis" aria-hidden="true">……</span></button><span v-if="item.priority === true" class="urgent-mark item-status">优先处理</span></div>
+        <div class="item-line"><button type="button" class="category-title project-list-trigger" :aria-label="item.title ? undefined : '打开空名称项目详情'" :aria-expanded="selectedProjectId === item.id" @click="toggleProjectDetails(item.id)">{{ item.title }}<PinnedMark :item="item" /><span v-for="tag in item.tags" :key="tag" class="project-user-tag">#{{ tag.replace(/^#+/, '') }}</span><span v-if="!showProjects && projects.length > 2 && index === 1" class="more-ellipsis" aria-hidden="true">……</span></button><span v-if="item.priority === true" class="urgent-mark item-status">优先处理</span></div>
         <p class="project-next-step">{{ item.nextStep }}</p>
       </article>
     </section>
@@ -581,9 +642,9 @@ async function confirmImport() {
       <button type="button" class="category-expand" :aria-expanded="showCompleted" :aria-label="`${showCompleted ? '收起' : '展开'}已完成`" @click="toggleCategory('completed')"><span class="fold-mark" aria-hidden="true">{{ showCompleted ? 'v' : '>' }}</span><span>已完成</span><small>{{ completedCount }}</small></button>
       <div v-if="showCompleted">
         <p v-if="!completedCount" class="empty">还没有已完成的事项。</p>
-        <OrdinaryItem v-for="task in completedTodos" :key="task.id" :ref="el=>registerEditor(task.id,el)" :item="task" :can-edit="canEditLocal" :expanded="selectedTodoId === task.id" :save-item="saveOrdinaryItem" @editing="protectOrdinary" @expand="expandOrdinary(task)" @complete="toggleTask(task.id)" @delete="deleteItem(task.id)" />
-        <article v-for="item in completedProjects" :key="item.id" class="category-row completed-project">
-          <div class="item-line"><button type="button" class="category-title project-list-trigger" :aria-label="item.title ? undefined : '打开已完成的空名称项目详情'" :aria-expanded="selectedProjectId === item.id" @click="toggleProjectDetails(item.id)">{{ item.title }}<span v-for="tag in item.tags" :key="tag" class="project-user-tag">#{{ tag.replace(/^#+/, '') }}</span></button><span v-if="item.priority === true" class="urgent-mark item-status">优先处理</span></div>
+        <OrdinaryItem v-for="task in completedTodos" :key="task.id" :id="'completed-' + task.id" :class="{ located:highlighted === task.id }" :ref="el=>registerEditor(task.id,el)" :item="task" :can-edit="canEditLocal" :expanded="selectedTodoId === task.id" :save-item="saveOrdinaryItem" @editing="protectOrdinary" @expand="expandOrdinary(task)" @complete="toggleTask(task.id)" @delete="deleteItem(task.id)" />
+        <article v-for="item in completedProjects" :key="item.id" :id="'completed-' + item.id" :class="{ located:highlighted === item.id }" class="category-row completed-project">
+          <div class="item-line"><button type="button" class="category-title project-list-trigger" :aria-label="item.title ? undefined : '打开已完成的空名称项目详情'" :aria-expanded="selectedProjectId === item.id" @click="toggleProjectDetails(item.id)">{{ item.title }}<PinnedMark :item="item" /><span v-for="tag in item.tags" :key="tag" class="project-user-tag">#{{ tag.replace(/^#+/, '') }}</span></button><span v-if="item.priority === true" class="urgent-mark item-status">优先处理</span></div>
           <p class="project-next-step">{{ item.nextStep }}</p>
         </article>
       </div>

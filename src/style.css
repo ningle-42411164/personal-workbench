@@ -87,7 +87,7 @@ input:focus, select:focus { border-color: #244d43; }
 .project-dialog { width: min(680px, calc(100vw - 28px)); max-width: none; max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); margin: auto; padding: 20px; border: 1px solid #dfe5df; border-radius: 16px; color: #243d36; background: #fff; overflow: auto; overscroll-behavior: contain; box-shadow: 0 20px 80px #17382d40; }
 .project-dialog::backdrop { background: #152e2870; }
 .project-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.project-dialog-title { margin: 0; }
+.project-dialog-title { display:inline-flex; align-items:center; gap:4px; margin:0; }
 .project-dialog-head .project-close { flex: 0 0 44px; width: 44px; height: 44px; border-radius: 8px; }
 .project-dialog .project-detail { margin-top: 12px; }
 .project-dialog .project-field-row { grid-template-columns: 100px minmax(0, 1fr); }
@@ -182,8 +182,6 @@ footer { margin-top: 28px; font-size: 13px; line-height: 1.7; }
 .project-dialog-body .project-edit { margin-top: 16px; }
 .quick-tag-summary { overflow-wrap: anywhere; }
 @media (max-width: 480px) { .project-dialog { width: calc(100vw - 40px); } .project-dialog-body .project-date-fields { grid-template-columns: minmax(0, 1fr); } }
-.action-toast{position:fixed;bottom:calc(18px + env(safe-area-inset-bottom));right:16px;z-index:9;background:#244c3f;color:white;border-radius:12px;padding:10px 16px;pointer-events:none}
-.category-row.paused .project-list-trigger,.category-row.paused .project-next-step{color:#616a65}
+.completed-section .located { background:#e1eee4; }
+.category-row.paused .project-list-trigger,.category-row.paused .project-next-step{color:#748079}
 .project-field-label,.project-field-value,.detail-actions button,.project-edit button{text-decoration:none}
-.hint-button{padding:0;width:34px;height:34px;background:#edf3ed;color:#365749;border-radius:50%;anchor-name:--project-hint}
-.field-hint{font-size:14px;font-weight:400;line-height:1.55;color:#243d36;background:#fff;border:1px solid #cad9cd;border-radius:10px;padding:10px;max-width:calc(100vw - 32px);position:fixed;inset:auto;position-anchor:--project-hint;top:anchor(bottom);left:clamp(12px,anchor(left),calc(100vw - 240px))}

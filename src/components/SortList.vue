@@ -8,7 +8,7 @@ const list=ref(null);
 let sorter, snapshot, cancelled=false, dragging=false;
 function capture(e) { sorter.option('delay',e.target.closest('.sort-handle') ? 0 : 350); cancelled=false; }
 function outside(e) {
-  if (e.target.closest('.sync-control')) return; // 查看页头状态时保留当前排序上下文。
+  if (e.target.closest('.sync-control, .success-entry')) return; // 查看页头状态时保留当前排序上下文。
   if (dragging || list.value.contains(e.target) || e.target.closest('.sort-toggle') === list.value.closest('section').querySelector('.sort-toggle')) return;
   e.preventDefault(); e.stopImmediatePropagation(); emit('exit');
 }

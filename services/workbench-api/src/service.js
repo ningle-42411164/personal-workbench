@@ -1,7 +1,7 @@
 import { createSchema, updateSchema, listSchema, getProjectSchema, makeItem, patchProject, fingerprint, itemPatchSchema, completionSchema, deleteSchema, changesSchema, patchItem, setCompletion, syncSchema, syncItem } from './domain.js';
 import { ApiError } from './errors.js';
 import { syncBatchSchema, convertSchema } from './domain.js';
-import { convertNote } from '../../../src/data/workbenchData.js';
+import { convertNote, moveNote } from '../../../src/data/workbenchData.js';
 
 export const READ_SCOPE = 'workbench:read';
 export const WRITE_SCOPE = 'workbench:write';
@@ -50,11 +50,18 @@ export class WorkbenchService {
     if (parsed.item.convertedToId) throw new ApiError(400, 'BATCH_REQUIRED', '转换关联必须一起同步，原内容保留。');
     const hash = await fingerprint('sync_item', parsed);
     const replay = await this.store.receipt(parsed.requestId, hash);
-    if (replay) return replay;
+    if (replay) return parsed.moveFrom ? replay.records[0] : replay;
+    if (parsed.moveFrom && parsed.expectedVersion === 0) throw new ApiError(400, 'INVALID_INPUT', '移动须提供已有随笔的版本。');
     if (parsed.expectedVersion === 0) return this.store.create(parsed.requestId, hash, syncItem(parsed));
     const current = await this.getItem({ id: parsed.id });
     if (current.version !== parsed.expectedVersion) throw new ApiError(409, 'VERSION_CONFLICT', '记录已变化，本机修改保留待比较。');
-    return this.store.update(parsed.requestId, hash, current, syncItem(parsed, current.item));
+    const item = syncItem(parsed, current.item);
+    if (parsed.moveFrom) {
+      if (current.item.type !== 'note' || item.type === 'note') throw new ApiError(400, 'INVALID_INPUT', '移动来源或目标无效。');
+      const response = await this.store.syncBatch(parsed.requestId, hash, [{ id: parsed.id, current, item }]);
+      return response.records[0];
+    }
+    return this.store.update(parsed.requestId, hash, current, item);
   }
   async syncBatch(input) {
     this.require(READ_SCOPE); this.require(WRITE_SCOPE);
@@ -87,9 +94,15 @@ export class WorkbenchService {
     if (replay) return replay;
     const current = await this.getItem({ id: parsed.id });
     if (current.version !== parsed.expectedVersion) throw new ApiError(409, 'VERSION_CONFLICT', '随笔已变化，转换未执行。');
-    if (current.item.type !== 'note' || current.item.convertedToId) throw new ApiError(400, 'INVALID_INPUT', '只有尚未转换的随笔可以转换。');
+    if (current.item.type !== 'note' || current.item.convertedToId || parsed.mode === 'move' && current.item.done) throw new ApiError(400, 'INVALID_INPUT', '只有尚未转换的随笔可以转换。');
     if (parsed.targetDate && parsed.targetType !== 'importantDate') throw new ApiError(400, 'INVALID_INPUT', '只有重要日需要目标日期。');
     if (parsed.targetType === 'importantDate' && !parsed.targetDate) throw new ApiError(400, 'INVALID_INPUT', '重要日需要目标日期。');
+    if (parsed.mode === 'move') {
+      const [item] = moveNote([current.item], parsed.id, parsed.targetType, parsed.targetDate);
+      item.rank = await this.store.frontRank(item);
+      return this.store.syncBatch(parsed.requestId, hash, [{ id: parsed.id, current, item }]);
+    }
+    // 无 mode 的旧请求（含重试）仍采用双记录协议和原指纹。
     const items = convertNote([current.item], parsed.id, parsed.targetType, parsed.targetDate);
     return this.store.syncBatch(parsed.requestId, hash, items.map(item => ({ id: item.id, current: item.id === parsed.id ? current : null, item })));
   }

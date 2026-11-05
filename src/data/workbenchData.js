@@ -1,3 +1,5 @@
+import { frontRank } from './itemOrder.js';
+
 export const STORAGE_KEY = 'personal-workbench.data.v2';
 export const SCHEMA_VERSION = 2;
 const SIMPLE_TYPES = ['project', 'shopping', 'waiting', 'creation'];
@@ -244,7 +246,36 @@ export function comparePriorityThenNewest(a, b) {
   return Number(Boolean(b.priority)) - Number(Boolean(a.priority)) || b.createdAt.localeCompare(a.createdAt);
 }
 
-// 转换保留原随笔，并同时生成一个新事项；页面只需将返回数组保存一次。
+// 旧协议的双记录请求继续使用原关联规则，新录入使用同 ID 的 moveNote。
+export function canMoveNote(source, targetType) {
+  return source?.type === 'note' && !source.done && !source.convertedToId && CONVERSION_TYPES.includes(targetType);
+}
+export function moveNote(items, id, type, date, now = new Date().toISOString()) {
+  const note = items.find(item => item.id === id);
+  if (!canMoveNote(note, type) || items.some(item => item.convertedToId === id)) throw new Error('这条随笔不能移动，请保留原有内容和关联。');
+  if (type === 'importantDate' && !isCalendarDate(date)) throw new Error('请先选择有效的目标日期。');
+  const target = type === 'todo' ? createTodo(note.title, false, now)
+    : type === 'importantDate' ? createImportantDate(note.title, date, now)
+    : createSimpleItem(type, note.title, now);
+  Object.assign(target, { id, title:note.title, createdAt: note.createdAt, tags: [...note.tags] });
+  if (note.pinned !== undefined) target.pinned = note.pinned;
+  if (note.priority !== undefined) target.priority = note.priority;
+  target.rank = frontRank(items, target);
+  const moved = items.map(item => item.id === id ? target : item);
+  validateWorkbenchData({ schemaVersion: SCHEMA_VERSION, items: moved });
+  return moved;
+}
+
+// 同步先提交单纯移动；若用户已继续编辑，回执只推进基准，队列随后补传新的内容。
+export function initialMoveSnapshot(source, desired) {
+  const creation = desired.type === 'project' ? desired.updates?.[0] : null;
+  const time = creation?.createdAt ?? desired.updatedAt;
+  const [initial] = moveNote([source], source.id, desired.type, desired.targetDate, time);
+  initial.rank = desired.rank;
+  if (creation) initial.updates[0].id = creation.id;
+  return initial;
+}
+
 export function convertNote(items, noteId, targetType, targetDate, now = new Date().toISOString()) {
   const note = items.find(item => item.id === noteId && item.type === 'note');
   if (!note || note.convertedToId) throw new Error('这条随笔已录入，不能重复转换。');

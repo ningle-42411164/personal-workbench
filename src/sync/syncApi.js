@@ -50,7 +50,7 @@ export function createSyncApi({ auth, fetcher = globalThis.fetch, issuer = CLOUD
       }
       const { requestId, expectedVersion, item, id } = job;
       const result = await request(item ? `/api/sync/items/${encodeURIComponent(id)}` : `/api/items/${encodeURIComponent(id)}`,
-        item ? 'PUT' : 'DELETE', { requestId, expectedVersion, ...(item ? { item } : {}) }, signal);
+        item ? 'PUT' : 'DELETE', { requestId, expectedVersion, ...(job.moveFrom ? { moveFrom: job.moveFrom } : {}), ...(item ? { item } : {}) }, signal);
       record(result, id);
       const validVersion = expectedVersion === 0 ? result.version === 1 : result.version === expectedVersion + 1 || item && result.version === expectedVersion;
       if (!validVersion || Boolean(result.deleted) !== !item || item && !equal(result.item, { ...item, tags: normalizeUserTags(item.tags) })) throw fail('network', '回执与原请求不一致，本机内容保留，将使用原请求重新核对。');

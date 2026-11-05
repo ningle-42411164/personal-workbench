@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue';
+import PinnedMark from './PinnedMark.vue';
 import { daysUntil } from '../data/workbenchData.js';
 const props = defineProps({ items: Array, today: Date, canEdit: Boolean });
 defineEmits(['delete']);
@@ -16,10 +17,10 @@ const remaining = item => daysUntil(item.targetDate, props.today);
   <p v-if="!items.length" class="empty">还没有重要日，选一个值得记住的日期吧。</p>
   <div v-else :class="['day-deck', { pair: items.length === 2, stack: stacked }]">
     <template v-if="stacked">
-      <button v-for="delta in [1,2]" :key="relative(delta).id" type="button" class="peek" @click="select(relative(delta))"><span>{{ relative(delta).title }}</span><time>{{ relative(delta).targetDate }}</time></button>
+      <button v-for="delta in [1,2]" :key="relative(delta).id" type="button" class="peek" @click="select(relative(delta))"><span>{{ relative(delta).title }}<PinnedMark :item="relative(delta)" /></span><time>{{ relative(delta).targetDate }}</time></button>
     </template>
     <article v-for="item in visible" :key="item.id" class="day-face">
-      <button type="button" class="day-name" :aria-expanded="detail === item.id" @click="detail = detail === item.id ? null : item.id">{{ item.title }}</button>
+      <button type="button" class="day-name" :aria-expanded="detail === item.id" @click="detail = detail === item.id ? null : item.id">{{ item.title }}<PinnedMark :item="item" /></button>
       <time :datetime="item.targetDate">{{ item.targetDate }}</time>
       <small>{{ remaining(item) > 0 ? '还有' : remaining(item) < 0 ? '已过' : '今天' }}</small>
       <div class="days"><b>{{ Math.abs(remaining(item)) }}</b><span>天</span></div>
@@ -32,11 +33,11 @@ const remaining = item => daysUntil(item.targetDate, props.today);
 </template>
 <style scoped>
 .day-deck {
-  --date-ink:#243d36; --date-muted:#65766e; --date-accent:#244d43; --date-border:#c7d5c9;
-  --date-front-start:#dfe9df; --date-front-end:#f0f2e8; --date-back:#f6f8f3; --date-middle:#edf3e9;
+  --date-ink:#243d36; --date-muted:#65766e; --date-accent:#244d43; --date-border:transparent;
+  --date-fill:linear-gradient(135deg,#e7efe9,#f5f4ef);
 }
 .day-face,.peek { box-sizing:border-box; min-width:0; border:1px solid var(--date-border); color:var(--date-ink); overflow-wrap:anywhere; }
-.day-face { position:relative; min-height:164px; padding:16px; border-radius:14px; text-align:left; background:linear-gradient(135deg,var(--date-front-start),var(--date-front-end)); }
+.day-face { position:relative; min-height:164px; padding:16px; border-radius:14px; text-align:left; background:var(--date-fill); }
 .day-name { display:block; max-width:100%; padding:0; color:inherit; background:transparent; font-size:1.0625rem; line-height:1.35; text-align:inherit; overflow-wrap:anywhere; }
 .day-face time,.day-face small { display:block; margin:0; color:var(--date-muted); font-size:.75rem; }
 .day-face time { margin-top:5px; }
@@ -54,8 +55,8 @@ const remaining = item => daysUntil(item.targetDate, props.today);
 .pair .days b { font-size:1.875rem; }
 @media(max-width:360px) { .pair { gap:8px; } .pair .day-face { padding:10px; } }
 /* 标题条参与正常排版；名称增高时，完整前卡随之下移。 */
-.peek { display:flex; align-items:center; justify-content:space-between; gap:8px; width:calc(100% - 28px); min-height:48px; margin:0 auto; padding:9px 12px; border-radius:13px 13px 0 0; border-bottom:0; text-align:left; background:var(--date-back); font-size:.8125rem; }
-.peek:nth-child(2) { width:calc(100% - 14px); background:var(--date-middle); }
+.peek { display:flex; align-items:center; justify-content:space-between; gap:8px; width:calc(100% - 28px); min-height:48px; margin:0 auto; padding:9px 12px; border-radius:13px 13px 0 0; border-bottom:0; text-align:left; background:var(--date-fill); font-size:.8125rem; }
+.peek:nth-child(2) { width:calc(100% - 14px); }
 .peek span { min-width:0; }
 .peek time { flex:none; color:var(--date-muted); font-size:.6875rem; }
 .stack .day-face { min-height:230px; padding:22px 49px 20px; text-align:center; }

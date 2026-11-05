@@ -34,14 +34,14 @@ export class D1Store {
       ? { item, version: current ? current.version + (item === current.item ? 0 : 1) : 1 }
       : { id, deleted: true, version: current.version + 1 }) };
     // 固定参数数目，不把 32 条版本/删除依赖展开成上百个绑定参数。
-    const expected = JSON.stringify(entries.map(({ id, current, item }) => ({ id, version: current?.version ?? 0, deleted: !item })));
+    const expected = JSON.stringify(entries.map(({ id, current, item }) => ({ id, version: current?.version ?? 0, deleted: !item, moving: current?.item.type === 'note' && item && item.type !== 'note' ? 1 : 0 })));
     const guard = `NOT EXISTS(SELECT 1 FROM json_each(?) e
       LEFT JOIN workbench_items i ON i.owner_id = ? AND i.item_id = json_extract(e.value, '$.id')
       LEFT JOIN deleted_items d ON d.owner_id = ? AND d.item_id = json_extract(e.value, '$.id')
       WHERE CASE WHEN json_extract(e.value, '$.version') = 0 THEN i.item_id IS NOT NULL OR d.item_id IS NOT NULL
       ELSE i.version IS NULL OR i.version <> json_extract(e.value, '$.version') END)
       AND NOT EXISTS(SELECT 1 FROM workbench_items n JOIN json_each(?) e ON json_extract(n.item_json, '$.convertedToId') = json_extract(e.value, '$.id')
-      WHERE n.owner_id = ? AND json_extract(e.value, '$.deleted') = 1 AND n.item_id NOT IN (SELECT json_extract(value, '$.id') FROM json_each(?)))`;
+      WHERE n.owner_id = ? AND (json_extract(e.value, '$.moving') = 1 OR (json_extract(e.value, '$.deleted') = 1 AND n.item_id NOT IN (SELECT json_extract(value, '$.id') FROM json_each(?)))))`;
     const at = new Date().toISOString();
     // 回执准入与所有写入在同一个事务；任一版本不匹配时整组零写入，SQL 失败则全部回滚。
     const statements = [this.db.prepare(`INSERT INTO mutation_receipts(owner_id, request_id, fingerprint, response_json, created_at)

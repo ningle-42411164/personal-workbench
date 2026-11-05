@@ -14,10 +14,13 @@ const draft = ref({ title: '', status: '', tags: [], startDate: '', dueDate: '',
 const error = ref('');
 const saving = ref(false);
 function requestClose() {
-  if (saving.value) return;
+  if (saving.value) return false;
   const changed = Object.values(draft.value).some(value => Array.isArray(value) ? value.length : value !== '');
-  if (!changed || window.confirm('放弃尚未保存的新项目内容？')) emit('close');
+  if (changed && !window.confirm('放弃尚未保存的新项目内容？')) return false;
+  emit('close');
+  return true;
 }
+defineExpose({ requestClose });
 async function save() {
   if (saving.value) return;
   saving.value = true;
