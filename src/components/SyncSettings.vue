@@ -48,8 +48,10 @@ function summary(item) {
     <p v-if="status.lastSuccess">最后完成同步：{{ new Date(status.lastSuccess).toLocaleString() }}</p>
     <article v-for="conflict in groups" :key="conflict.id" class="import-confirm">
       <h3>{{ conflict.local?.title || conflict.remote?.item?.title || '已在本机删除的事项' }}</h3>
-      <p v-if="conflict.kind === 'rejected'">此项请求被拒绝，尚未同步；本机内容及原待同步请求保留，其他事项继续同步。</p>
+      <p v-if="conflict.kind === 'rejected' && !conflict.resolving">此项请求被拒绝，尚未同步；本机内容及原待同步请求保留，其他事项继续同步。</p>
       <p v-else>{{ conflict.message }}</p>
+      <p v-if="conflict.kind === 'rejected' && !conflict.resolving">拒绝原因代码：{{ conflict.code || '未保存错误码' }}。转换未完成，内容与当前步骤请求仍保留。</p>
+      <p v-if="conflict.code === 'IMMUTABLE_FIELD' && conflict.remote && !conflict.resolving">原请求改变了受保护字段而被拒绝。请核对下方双方内容并选择；若无法合法转换，会保留双方并显示原因。</p>
       <details v-if="conflict.kind === 'rejected'" class="rejection-details">
         <summary>查看拒绝详情（只读）</summary>
         <p>请提供下列信息以核对原因；展开不会重试、覆盖或清除请求。</p>
@@ -64,13 +66,13 @@ function summary(item) {
           <p>本机（基于 v{{ row.version }} 的修改）：{{ summary(row.local) }}</p>
           <p>云端 v{{ row.remote.version }}：{{ summary(row.remote.item) }}</p>
         </div>
-        <template v-if="!conflict.resolving && conflict.kind !== 'rejected'">
+        <template v-if="!conflict.resolving && (conflict.kind !== 'rejected' || conflict.code === 'IMMUTABLE_FIELD' || snapshot.outbox[conflict.id]?.resolutionTarget)">
           <label>选择版本 <select v-model="choices[conflict.id]">
             <option :value="undefined" disabled>请选择</option>
             <option value="local">采用本机版本</option>
             <option value="remote">采用云端版本</option>
           </select></label>
-          <p v-if="choices[conflict.id] === 'local'">本机内容将成为继续同步的版本；提交前核对最新云端版本，再次变化则重新提示。已删除 ID 不会被强行复活。</p>
+          <p v-if="choices[conflict.id] === 'local'">本机内容将成为继续同步的版本；分类变化由程序按合法步骤处理，只需确认一次。提交前核对最新云端版本，再次变化则重新提示。已删除 ID 不会被强行复活。</p>
           <p v-if="choices[conflict.id] === 'remote'">采用最新云端内容；现有本机内容另存冲突副本，副本不自动上传。</p>
           <button type="button" class="secondary" :disabled="!choices[conflict.id]" @click="emit('resolve', { id: conflict.id, choice: choices[conflict.id], revision: snapshot.revision, displayed: snapshot.blocked[conflict.id] })">确认选择</button>
         </template>

@@ -1,10 +1,11 @@
+import { returnTodo } from '../src/data/itemOrder.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { IDBFactory } from 'fake-indexeddb';
 import { createSyncStore } from '../src/sync/syncStore.js';
 import { createSyncEngine } from '../src/sync/syncEngine.js';
 import { createSyncApi } from '../src/sync/syncApi.js';
-import { createNote, createSimpleItem, createRoutine, createImportantDate, convertNote, renameItem, toggleTodo, removeItem, validateWorkbenchData } from '../src/data/workbenchData.js';
+import { createTodo, moveNote, createNote, createSimpleItem, createRoutine, createImportantDate, convertNote, renameItem, toggleTodo, removeItem, validateWorkbenchData } from '../src/data/workbenchData.js';
 import { prepareOwnerPhoneSync } from '../src/sync/ownerPhone.js';
 import { WorkbenchService, READ_SCOPE, WRITE_SCOPE } from '../services/workbench-api/src/service.js';
 import { D1Store } from '../services/workbench-api/src/store.js';
@@ -458,4 +459,94 @@ test('移动后在补传前继续编辑，先按基准移动再提交本机草�
   assert.equal(requests[0].moveFrom,'note');assert.equal(requests[0].item.title,'来源标题');
   assert.equal(requests[1].item.title,'继续修改');assert.equal(requests[1].moveFrom,undefined);
   assert.deepEqual((await s.store.read()).dirty,{});
+});
+
+async function rejectedConversion(t) {
+  const todo = createTodo('分类转换隔离测试', false, at), s = fixture(t, [todo]);
+  await s.engine.run();
+  await save(s, items => moveNote(returnTodo(items, todo.id), todo.id, 'waiting'));
+  await s.engine.run();
+  const state = await s.store.read();
+  assert.equal(state.blocked[todo.id].code, 'IMMUTABLE_FIELD');
+  assert.equal(state.blocked[todo.id].remote.item.type, 'todo');
+  return { ...s, id: todo.id, original: state.outbox[todo.id] };
+}
+
+test('分类拒绝：只选一次本机，丢回执与失败保留原步骤，最后成为同 ID 等待中', async t => {
+  const s = await rejectedConversion(t);
+  const before = await s.store.read(), target = before.data.items[0];
+  await choose(s, 'local');
+  let state = await s.store.read();
+  assert.deepEqual(state.archive.find(x => x.choice === 'local-replaced-request').request, s.original);
+  const step1 = state.outbox[s.id];
+  assert.equal(step1.item.type, 'note');
+  s.controls.loseReply = true; await s.engine.run();
+  state = await s.store.read(); assert.deepEqual(state.outbox[s.id], step1); assert.ok(state.blocked[s.id].resolving);
+  assert.deepEqual(state.data.items[0], target);
+  s.controls.fail = true; await s.engine.run(); assert.deepEqual((await s.store.read()).outbox[s.id], step1);
+  s.controls.fail = false; await s.engine.run();
+  state = await s.store.read(); assert.deepEqual(state.blocked, {});
+  assert.deepEqual((await s.service.getItem({ id:s.id })).item, target);
+  assert.equal(state.data.items.length, 1); assert.deepEqual(state.outbox, {});
+});
+
+test('分类拒绝：采用云端保存本机副本和原请求，重复确认不生成副本', async t => {
+  const s = await rejectedConversion(t);
+  const before = await s.store.read();
+  await choose(s, 'remote');
+  const state = await s.store.read();
+  assert.equal(state.data.items.find(x=>x.id===s.id).type,'todo');
+  assert.equal(state.data.items.find(x=>x.id!==s.id).type,'waiting');
+  assert.equal(Object.keys(state.heldLocal).length,1);
+  assert.deepEqual(state.archive.find(x=>x.id===s.id).request,s.original);
+  assert.equal((await s.service.getItem({id:s.id})).version,1);
+  await assert.rejects(resolveConflict({store:s.store,api:s.api,id:s.id,choice:'remote',revision:before.revision}));
+  assert.equal((await s.store.read()).data.items.length,2);
+});
+
+test('分类选择前再次变化只更新对照；转换中发生竞争不自动覆盖', async t => {
+  const s = await rejectedConversion(t);
+  await s.service.patchItem({id:s.id,expectedVersion:1,requestId:'conversion-concurrent-before',fields:{title:'云端新内容'}});
+  await assert.rejects(choose(s,'local'),/再次变化/);
+  assert.equal((await s.store.read()).data.items[0].title,'分类转换隔离测试');
+  await choose(s,'local');
+  let job=await s.store.prepare();
+  await s.store.acknowledge(job,await s.api.send(job));
+  let state=await s.store.read(); assert.ok(state.blocked[s.id].resolving);
+  assert.equal(state.outbox[s.id].moveFrom,'note');
+  await s.service.patchItem({id:s.id,expectedVersion:3,requestId:'conversion-concurrent-during',fields:{title:'转换期间的新内容'}});
+  await s.engine.run(); state=await s.store.read();
+  assert.equal(state.blocked[s.id].kind,'conflict');
+  assert.equal(state.blocked[s.id].remote.item.title,'转换期间的新内容');
+  assert.equal(state.data.items[0].type,'waiting');
+  assert.equal(state.data.items[0].title,'分类转换隔离测试');
+});
+
+test('已有分类拒绝请求仅补读云端对照，不重发；读失败保留', async t => {
+  const s=await rejectedConversion(t);
+  // 模拟旧版已经持久化但未读取 remote 的拒绝，仍保留原 job。
+  const db=await new Promise((resolve,reject)=>{const r=s.indexedDB.open('personal-workbench.local-sync.v1',1);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});
+  await new Promise((resolve,reject)=>{const tx=db.transaction('state','readwrite'), os=tx.objectStore('state'), r=os.get('workbench');r.onsuccess=()=>{const state=r.result;state.blocked[s.id].remote=null;os.put(state,'workbench')};tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)});db.close();
+  const count=s.controls.writes.length;
+  s.controls.fail=true;await s.engine.run();assert.deepEqual((await s.store.read()).outbox[s.id],s.original);
+  s.controls.fail=false;await s.engine.run();
+  assert.equal(s.controls.writes.length,count);
+  assert.equal((await s.store.read()).blocked[s.id].remote.version,1);
+});
+
+test('转换后续步骤丢回执可重试，明确拒绝保留目标和云端中间状态', async t => {
+  const s=await rejectedConversion(t);await save(s,items=>items.map(item=>renameItem(item,'选择后应保留的本机内容')));await choose(s,'local');
+  let job=await s.store.prepare();await s.store.acknowledge(job,await s.api.send(job));
+  job=await s.store.prepare();assert.equal(job.moveFrom,'note');
+  s.controls.loseReply=true;await s.engine.run();
+  assert.deepEqual((await s.store.read()).outbox[s.id],job);
+  const response=await s.api.send(job);await s.store.acknowledge(job,response);
+  let state=await s.store.read();const final=state.outbox[s.id];assert.ok(final.resolutionTarget);
+  await s.store.block(final,{kind:'rejected',code:'INVALID_INPUT',message:'目标内容校验失败'},null);
+  state=await s.store.read();assert.equal(state.blocked[s.id].message,'目标内容校验失败');
+  assert.equal(state.blocked[s.id].remote.item.type,'waiting');
+  assert.equal(state.data.items[0].type,'waiting');assert.deepEqual(state.outbox[s.id],final);
+  // 明确拒绝后可按最新对照重新选择，网络结果不明时则仍复用原请求。
+  await choose(s,'local');await s.engine.run();
+  assert.deepEqual((await s.store.read()).blocked,{});
 });

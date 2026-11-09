@@ -20,6 +20,15 @@ export function createSyncEngine({ store, api, beforeRun = () => store.read(), i
         if (!active()) return;
         if (!state.enabled) { publish('paused', '自动同步未开启；本机仍可编辑。'); return; }
         if (!isOnline()) { publish('offline', '离线：待同步修改已保存在本机，联网后自动继续。'); return; }
+        // 已拒绝的旧请求不重放；只读取云端以恢复原版本选择入口。
+        for (const [id, blocked] of Object.entries(state.blocked)) {
+          if (blocked.code !== 'IMMUTABLE_FIELD' || blocked.remote || blocked.resolving || !state.outbox[id]) continue;
+          const job = state.outbox[id];
+          const records = [];
+          for (const entry of job.entries ?? [job]) records.push(await api.get(entry.id, signal, true));
+          if (!active()) return;
+          await store.block(job, blocked, job.entries ? { records } : records[0], active);
+        }
         const pending = Object.keys(state.dirty).length;
         publish('syncing', pending ? `待同步 ${pending} 项，正在连接云端…` : '正在获取云端变化…');
         for (let count = 0; count < 100 && active(); count++) {
@@ -52,7 +61,14 @@ export function createSyncEngine({ store, api, beforeRun = () => store.read(), i
                   } else await store.block(job, error, remote, active);
                 }
               }
-            } else if (error.kind === 'rejected') await store.block(job, error, null, active);
+            } else if (error.kind === 'rejected') {
+              await store.block(job, error, null, active);
+              if (error.code === 'IMMUTABLE_FIELD') {
+                const records = [];
+                for (const entry of job.entries ?? [job]) records.push(await api.get(entry.id, signal, true));
+                if (active()) await store.block(job, error, job.entries ? { records } : records[0], active);
+              }
+            }
             else throw error;
           }
         }

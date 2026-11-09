@@ -1,3 +1,4 @@
+import { conversionStep } from './conversionResolution.js';
 import { STORAGE_KEY, emptyWorkbenchData, validateWorkbenchData, removeItem, initialMoveSnapshot, canMoveNote } from '../data/workbenchData.js';
 import { isKnownTestRecord } from './knownTestRecords.js';
 import { PHONE_ENROLLMENT_VERSION } from './ownerPhone.js';
@@ -110,7 +111,7 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
           if (!oldIds.has(item.id) && syncSupported(item) && !isKnownTestRecord(item.id) && !state.heldLocal?.[item.id] && !state.bindings[item.id]) state.bindings[item.id] = { version: 0, base: null };
         }
         for (const id of Object.keys(state.bindings)) {
-          if (state.blocked[id]?.kind === 'rejected' && state.blocked[id].code !== 'REQUEST_ID_REUSED'
+          if (state.blocked[id]?.kind === 'rejected' && !['REQUEST_ID_REUSED', 'IMMUTABLE_FIELD'].includes(state.blocked[id].code)
             && !equal(previous.items.find(item => item.id === id) ?? null, currentItem(state, id))) {
             const rejected = state.outbox[id];
             for (const entry of rejected?.entries ?? [{ id }]) { delete state.blocked[entry.id]; delete state.outbox[entry.id]; }
@@ -187,6 +188,16 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
         if (!allowed()) return;
         if (state.outbox[job.id]?.requestId !== job.requestId) return;
         const resolving = state.blocked[job.id];
+        // 多步转换的回执只推进基准，最后一个确认前始终保留双方与处理中状态。
+        if (job.resolutionTarget && !equal(response.item, job.resolutionTarget)) {
+          const next = conversionStep(response.item, job.resolutionTarget);
+          state.bindings[job.id] = { version: response.version, base: copy(response.item) };
+          state.archive.push({ id: job.id, request: copy(job), receipt: copy(response), choice: 'local-step' });
+          state.outbox[job.id] = { id: job.id, expectedVersion: response.version, requestId: uuid(), ...next, resolutionTarget: copy(job.resolutionTarget) };
+          state.blocked[job.id] = { ...resolving, remote: copy(response), ...(resolving.group ? { group: [copy(response)] } : {}), resolving: true, message: '正在按合法步骤转换，尚未完成；双方内容及当前请求保留。' };
+          state.dirty[job.id] = true;
+          return;
+        }
         if (resolving?.resolving) {
           const sent = new Set((job.entries ?? [job]).map(entry => entry.id));
           for (const remote of resolving.group ?? [resolving.remote]) {
@@ -299,9 +310,16 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
           return !item && remote.deleted ? [] : [syncEntry(key, remote.version, remote.item, item)];
         });
         if (!entries.length) throw new Error('双方均已删除，请采用云端确认删除结果。');
+        const changingType = records.some(remote => remote.item && currentItem(state, remote.item.id) && remote.item.type !== currentItem(state, remote.item.id).type);
+        if (changingType && records.length > 1) throw new Error('关联组分类转换不能逐条提交，双方保留；可采用云端并保留本机副本。');
+        if (changingType) {
+          const target = copy(currentItem(state, id));
+          Object.assign(entries[0], conversionStep(records[0].item, target), { resolutionTarget: target });
+        }
         const job = entries.length > 1 ? { id: entries[0].id, requestId: uuid(), entries } : { ...entries[0], requestId: uuid() };
         // 用户选择与不可变内容在一个本机事务中落盘；不修改基准，也不清除冲突。
         for (const entry of entries) {
+          if (state.outbox[entry.id]) state.archive.push({ id: entry.id, request: copy(state.outbox[entry.id]), blocked: copy(state.blocked[entry.id]), choice: 'local-replaced-request' });
           state.outbox[entry.id] = job; state.dirty[entry.id] = true;
           state.blocked[entry.id] = { ...(state.blocked[entry.id] ?? conflict), resolving: true, message: '已选择本机，等待服务端确认；失败保留双方并按原请求重试。' };
         }
@@ -319,7 +337,7 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
           for (const key of ids) if (currentItem(state, key)) copies.set(key, uuid());
           for (const [key, copyId] of copies) {
             const local = copy(currentItem(state, key));
-            state.archive.push({ id: key, local, ...(state.blocked[key] ?? conflict) });
+            state.archive.push({ id: key, local, request: state.outbox[key] ? copy(state.outbox[key]) : null, ...(state.blocked[key] ?? conflict) });
             if (copies.has(local.convertedToId)) local.convertedToId = copies.get(local.convertedToId);
             state.data.items.push({ ...local, id: copyId, title: `${local.title.slice(0, 140)}（冲突副本）` });
             state.heldLocal ??= {}; state.heldLocal[copyId] = { reason: 'conflict-copy', originalId: key };
@@ -334,7 +352,7 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
           return;
         }
         const local = currentItem(state, id);
-        state.archive.push({ id, local, ...conflict });
+        state.archive.push({ id, local, request: state.outbox[id] ? copy(state.outbox[id]) : null, ...conflict });
         // 冲突副本保留在本机，不参加首次/重复自动纳入；不会用旧版本自动覆盖云端。
         if (local) {
           const copyId = uuid();
