@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue';
+import { rejectionDetails } from '../sync/rejectionDetails.js';
 import { NODE_ONE_VERSION } from '../sync/ownerPhone.js';
 import { isKnownTestRecord } from '../sync/knownTestRecords.js';
 const props = defineProps({ snapshot: Object, status: Object, connection: Object, ownerPhone: Boolean });
@@ -47,14 +48,23 @@ function summary(item) {
     <p v-if="status.lastSuccess">最后完成同步：{{ new Date(status.lastSuccess).toLocaleString() }}</p>
     <article v-for="conflict in groups" :key="conflict.id" class="import-confirm">
       <h3>{{ conflict.local?.title || conflict.remote?.item?.title || '已在本机删除的事项' }}</h3>
-      <p>{{ conflict.message }}</p>
+      <p v-if="conflict.kind === 'rejected'">此项请求被拒绝，尚未同步；本机内容及原待同步请求保留，其他事项继续同步。</p>
+      <p v-else>{{ conflict.message }}</p>
+      <details v-if="conflict.kind === 'rejected'" class="rejection-details">
+        <summary>查看拒绝详情（只读）</summary>
+        <p>请提供下列信息以核对原因；展开不会重试、覆盖或清除请求。</p>
+        <dl><template v-for="row in rejectionDetails(snapshot, conflict.id)" :key="row.label">
+          <dt>{{ row.label }}</dt><dd>{{ row.value }}</dd>
+        </template></dl>
+        <p>这里展示本机保存的信息，不代表云端最新内容。请求被拒绝不等于版本冲突，需先核对原因。</p>
+      </details>
       <template v-if="conflict.remote">
         <p v-if="conflict.group?.length > 1">以下 {{ conflict.group.length }} 条关联记录一起选择、一起提交。</p>
         <div v-for="row in rows(conflict)" :key="row.id">
           <p>本机（基于 v{{ row.version }} 的修改）：{{ summary(row.local) }}</p>
           <p>云端 v{{ row.remote.version }}：{{ summary(row.remote.item) }}</p>
         </div>
-        <template v-if="!conflict.resolving">
+        <template v-if="!conflict.resolving && conflict.kind !== 'rejected'">
           <label>选择版本 <select v-model="choices[conflict.id]">
             <option :value="undefined" disabled>请选择</option>
             <option value="local">采用本机版本</option>
@@ -65,7 +75,7 @@ function summary(item) {
           <button type="button" class="secondary" :disabled="!choices[conflict.id]" @click="emit('resolve', { id: conflict.id, choice: choices[conflict.id], revision: snapshot.revision, displayed: snapshot.blocked[conflict.id] })">确认选择</button>
         </template>
       </template>
-      <p>本机冲突副本继续保留，不自动覆盖或再次上传；核对后可在原事项中处理。</p>
+      <p v-if="conflict.kind !== 'rejected'">本机冲突副本继续保留，不自动覆盖或再次上传；核对后可在原事项中处理。</p>
     </article>
     <p v-if="heldCopies.length">有 {{ heldCopies.length }} 份本机冲突副本，已保留在首页并标注“冲突副本”，暂不自动上传。</p>
     <details v-if="testRecords.length">
@@ -79,4 +89,7 @@ function summary(item) {
 <style scoped>
 .sync-settings button { margin: 6px 8px 6px 0; min-height: 44px; }
 .sync-settings p { overflow-wrap: anywhere; }
+.rejection-details summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
+.rejection-details dd { margin: 0 0 10px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.rejection-details dt { font-weight: 600; }
 </style>
