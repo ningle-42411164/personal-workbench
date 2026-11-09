@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue';
 import { needsBrowserConnection, browserConnectionUrl } from '../cloud/browserConnection.js';
-const props = defineProps({ state: { type: Object, required: true } });
+const props = defineProps({ state: { type: Object, required: true }, offlineSummary: Boolean });
 const emit = defineEmits(['login', 'logout', 'enable-write', 'resume']);
 const standalone = needsBrowserConnection();
 const browserHandoff = ref(false);
@@ -15,11 +15,11 @@ const labels = { checking: '恢复连接中', authorizing: '等待授权', signi
 </script>
 
 <template>
-  <section class="panel cloud-connection" aria-label="云端连接">
+  <section class="panel cloud-connection" aria-label="连接状态">
+    <h2>连接状态</h2>
     <div class="cloud-connection-head">
       <span class="connection-label" role="status">{{ labels[state.auth.state] || '未连接' }}{{ state.auth.state === 'connected' ? (state.auth.canWrite ? ' · 读写' : ' · 只读') : '' }}</span>
     </div>
-    <p>本机功能任何访客均可使用，无需登录。云端仅供工作台所有者连接；所有者已连接后，八类事项自动同步。</p>
     <div class="cloud-actions">
       <button v-if="state.auth.state !== 'connected'" class="secondary" type="button" :disabled="busy" @click="requestLogin()">{{ state.auth.state === 'expired' ? '所有者重新授权' : '所有者连接云端' }}</button>
       <button v-if="state.auth.state === 'connected' && !state.auth.canWrite" class="secondary" type="button" :disabled="busy" @click="requestLogin(true)">增加写入权限</button>
@@ -33,6 +33,6 @@ const labels = { checking: '恢复连接中', authorizing: '等待授权', signi
       <button type="button" class="secondary" :disabled="busy" @click="$emit('resume')">已在浏览器完成，检查连接</button>
     </div>
     <p class="cloud-note">{{ state.auth.message }}</p>
-    <p v-if="state.message" class="cloud-message" role="status">{{ state.message }}</p>
+    <p v-if="state.message && state.message !== state.auth.message" class="cloud-message" role="status">{{ offlineSummary ? '离线／已有内容可能已过期。待同步修改已保存在本机，联网后自动继续。' : state.message }}</p>
   </section>
 </template>

@@ -1,11 +1,27 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref, useId } from 'vue';
+import { onBeforeUnmount, onMounted, ref, useId, watch, nextTick } from 'vue';
 
-defineProps({ label:{type:String,default:'快速记录说明'}, below:Boolean });
+const props = defineProps({ label:{type:String,default:'快速记录说明'}, below:Boolean });
 const contentId = useId();
 const root = ref(null);
 const open = ref(false);
+const tip = ref(null), placement = ref({});
 let touch = false;
+// 浮层仍留在当前 dialog 内，按实际边界调整方向与水平偏移，不影响标题/页尾行高。
+async function positionTip() {
+  if (!open.value) return;
+  await nextTick();
+  if (!root.value || !tip.value) return;
+  const box = root.value.getBoundingClientRect(), bubble = tip.value.getBoundingClientRect();
+  const dialog = root.value.closest('dialog');
+  const boundary = dialog?.getBoundingClientRect();
+  const left = Math.max(8, boundary?.left ?? 8), right = Math.min(innerWidth - 8, boundary?.right ?? innerWidth - 8);
+  const top = Math.max(8, boundary?.top ?? 8);
+  const below = props.below || box.top - bubble.height - 8 < top;
+  placement.value = { left: Math.max(left - box.left, Math.min(-56, right - box.left - bubble.width)) + 'px',
+    top: below ? 'calc(100% + 6px)' : 'auto', bottom: below ? 'auto' : 'calc(100% + 6px)' };
+}
+watch(open, positionTip);
 
 function pointerDown(event) {
   touch = event.pointerType === 'touch' || event.pointerType === 'pen';
@@ -19,10 +35,14 @@ function escape(event) {
 onMounted(() => {
   document.addEventListener('pointerdown', outside, true);
   document.addEventListener('keydown', escape);
+  window.addEventListener('resize', positionTip);
+  window.addEventListener('scroll', positionTip, true);
 });
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', outside, true);
   document.removeEventListener('keydown', escape);
+  window.removeEventListener('resize', positionTip);
+  window.removeEventListener('scroll', positionTip, true);
 });
 </script>
 
@@ -34,7 +54,7 @@ onBeforeUnmount(() => {
       @click="open = touch ? !open : true">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M6.8 7H8v4h1.2m-1.2-6.7v.35"/></svg>
     </button>
-    <span v-show="open" :id="contentId" :class="{ below }" role="tooltip"><slot /></span>
+    <span ref="tip" :style="placement" v-show="open" :id="contentId" :class="{ below }" role="tooltip"><slot /></span>
   </span>
 </template>
 

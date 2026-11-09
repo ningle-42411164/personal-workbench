@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import PinnedMark from './PinnedMark.vue';
 import { daysUntil } from '../data/workbenchData.js';
-const props = defineProps({ items: Array, today: Date, canEdit: Boolean });
+const props = defineProps({ items: Array, today: Date, canEdit: Boolean, highlighted: String });
 defineEmits(['delete']);
 const selected = ref(null), detail = ref(null);
 const index = computed(() => Math.max(0, props.items.findIndex(item => item.id === selected.value)));
@@ -10,6 +10,8 @@ const stacked = computed(() => props.items.length >= 3);
 const visible = computed(() => stacked.value ? [props.items[index.value]] : props.items);
 const relative = delta => props.items[(index.value + delta + props.items.length) % props.items.length];
 function select(item) { selected.value = item.id; detail.value = null; }
+// 搜索只切换浏览卡片，不保存、排序或修改数据。
+defineExpose({ locate(id) { const item = props.items.find(value => value.id === id); if (item) selected.value = id; } });
 const remaining = item => daysUntil(item.targetDate, props.today);
 </script>
 
@@ -22,7 +24,7 @@ const remaining = item => daysUntil(item.targetDate, props.today);
         <PinnedMark :item="relative(delta)" />
       </div>
     </template>
-    <article v-for="item in visible" :key="item.id" class="day-face">
+    <article v-for="item in visible" :key="item.id" :id="'item-' + item.id" :class="{located:highlighted === item.id}" class="day-face">
       <button type="button" class="day-name" :aria-expanded="detail === item.id" @click="detail = detail === item.id ? null : item.id">{{ item.title }}</button>
       <PinnedMark :item="item" />
       <time :datetime="item.targetDate">{{ item.targetDate }}</time>

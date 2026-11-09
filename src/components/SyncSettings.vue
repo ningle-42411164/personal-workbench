@@ -3,7 +3,7 @@ import { computed, ref } from 'vue';
 import { rejectionDetails } from '../sync/rejectionDetails.js';
 import { NODE_ONE_VERSION } from '../sync/ownerPhone.js';
 import { isKnownTestRecord } from '../sync/knownTestRecords.js';
-const props = defineProps({ snapshot: Object, status: Object, connection: Object, ownerPhone: Boolean });
+const props = defineProps({ snapshot: Object, status: Object, connection: Object, ownerPhone: Boolean, suppressStatusMessage: Boolean });
 const emit = defineEmits(['enabled', 'resolve']);
 const pending = computed(() => Object.keys(props.snapshot?.dirty ?? {}).length);
 const conflicts = computed(() => Object.entries(props.snapshot?.blocked ?? {}).map(([id, value]) => ({ id, ...value, local: props.snapshot.data.items.find(item => item.id === id) })));
@@ -36,11 +36,10 @@ function summary(item) {
   <section class="panel sync-settings" aria-label="自动同步设置">
     <h2>自动同步 <small>{{ NODE_ONE_VERSION }}</small></h2>
     <p>所有者连接后，八类事项在原首页保存并自动同步；随笔转换保留原文并一起同步关联，日常无需上传按钮。</p>
-    <p v-if="!connection.auth.remembered && connection.auth.state !== 'connected' && !snapshot?.nodeOne">当前为本机使用，无需登录；云端仅供工作台所有者连接。</p>
-    <p v-else-if="ownerPhone && !snapshot?.nodeOne">此手机更新后会自动纳入支持的分类，复用有效读写连接，无需逐项勾选。</p>
+    <p v-if="ownerPhone && !snapshot?.nodeOne">此手机更新后会自动纳入支持的分类，复用有效读写连接，无需逐项勾选。</p>
     <p v-else-if="ownerPhone">已从此手机自动纳入 {{ snapshot?.nodeOne?.enrolledIds.length || 0 }} 项，已有绑定继续复用。</p>
     <p v-else>此设备不执行首次纳入，本机未绑定记录不会自动上传；首次来源只取正式页面上的手机数据。</p>
-    <p v-if="snapshot?.nodeOne || snapshot?.enabled || connection.auth.remembered" role="status">{{ status.message }}<template v-if="snapshot"> · 待同步 {{ pending }} 项 · 待核对 {{ conflicts.length }} 项</template></p>
+    <p v-if="snapshot?.nodeOne || snapshot?.enabled || connection.auth.remembered" role="status"><template v-if="!suppressStatusMessage">{{ status.message }}</template><template v-if="snapshot"> · 待同步 {{ pending }} 项 · 待核对 {{ conflicts.length }} 项</template></p>
     <button v-if="snapshot?.enabled" type="button" class="secondary" @click="emit('enabled', false)">暂停自动同步</button>
     <button v-else-if="snapshot?.nodeOne" type="button" :disabled="!connection.auth.canWrite" @click="emit('enabled', true)">恢复自动同步</button>
     <button v-else-if="snapshot && !ownerPhone && connection.auth.state === 'connected'" type="button" @click="emit('enabled', true)">启用已绑定事项同步</button>
