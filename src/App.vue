@@ -111,6 +111,28 @@ const projectDialog = ref(null);
 const selectedProject = computed(() => selectedProjectId.value && (personalItems.value.find(item => item.type === 'project' && item.id === selectedProjectId.value)
   ?? (projectAtOpen.value?.id === selectedProjectId.value ? projectAtOpen.value : null)));
 const showCompleted = ref(false);
+const completedLimit = ref(10);
+const themeKey = 'personal-workbench.theme.v1';
+const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
+const themeMode = ref('system');
+const themeError = ref('');
+try {
+  const saved = localStorage.getItem(themeKey);
+  if (['system', 'light', 'dark'].includes(saved)) themeMode.value = saved;
+} catch { /* 偏好不可读时跟随系统。 */ }
+function applyTheme() {
+  document.documentElement.dataset.theme = themeMode.value === 'system'
+    ? (systemTheme.matches ? 'dark' : 'light') : themeMode.value;
+}
+function selectTheme(mode) {
+  themeMode.value = mode;
+  applyTheme();
+  try { localStorage.setItem(themeKey, mode); themeError.value = ''; }
+  catch { themeError.value = '主题已切换，但本机设置未保存。'; }
+}
+applyTheme();
+systemTheme.addEventListener('change', applyTheme);
+onBeforeUnmount(() => systemTheme.removeEventListener('change', applyTheme));
 const showProjects = ref(false);
 const projectPreview = ref(true);
 const showOpenTodos = ref(true);
@@ -133,7 +155,7 @@ async function locateSearch(id) {
     searchMessage.value = '此事项仍在编辑，分类或完成状态已有变化；请先保存或取消，再定位。'; return;
   }
   sorting.value = null;
-  if (isCompletedItem(item)) showCompleted.value = true;
+  if (isCompletedItem(item)) revealCompleted(id);
   else if (item.type === 'project') { showProjects.value = true; projectPreview.value = false; }
   else if (item.type === 'todo') showOpenTodos.value = true;
   else if (Object.hasOwn(expandedCategories.value, item.type)) expandedCategories.value[item.type] = true;
@@ -175,6 +197,19 @@ const openTodos = computed(() => tasks.value.filter(task => !task.done).sort(com
 const completedTodos = computed(() => viewItems.value.filter(item => COMPLETABLE_TYPES.includes(item.type) && item.done).sort((a, b) => b.completedAt.localeCompare(a.completedAt)));
 const projects = computed(() => personalItems.value.filter(item => item.type === 'project' && item.status !== 'done').sort(compareRows));
 const completedProjects = computed(() => personalItems.value.filter(item => item.type === 'project' && item.status === 'done').sort((a, b) => b.completedAt.localeCompare(a.completedAt)));
+const visibleCompletedTodos = computed(() => completedTodos.value.slice(0, completedLimit.value));
+const visibleCompletedProjects = computed(() => completedProjects.value.slice(0, Math.max(0, completedLimit.value - completedTodos.value.length)));
+function revealCompleted(id) {
+  const index = [...completedTodos.value, ...completedProjects.value].findIndex(item => item.id === id);
+  completedLimit.value = Math.max(completedLimit.value, Math.ceil((index + 1) / 10) * 10);
+  showCompleted.value = true;
+}
+async function collapseCompleted() {
+  if (!await flushOrdinary()) return;
+  showCompleted.value = false;
+  await nextTick();
+  document.getElementById('completed-heading')?.scrollIntoView({ block: 'start' });
+}
 const completedCount = computed(() => completedTodos.value.length + completedProjects.value.length);
 const visibleProjects = computed(() => showProjects.value ? projects.value : projectPreview.value ? projects.value.filter(item => item.status !== 'paused').slice(0, 2) : []);
 const visibleOpenTodos = computed(() => showOpenTodos.value ? openTodos.value : []);
@@ -211,7 +246,7 @@ async function locateCompleted(target) {
     selectedProjectId.value = null;
   }
   if (!exists()) return;
-  showCompleted.value = true;
+  revealCompleted(target.id);
   await nextTick();
   const row = document.getElementById('completed-' + target.id);
   if (!row || !exists()) return;
@@ -234,7 +269,7 @@ async function expandOrdinary(item){
 async function toggleCategory(type){
   if(!await flushOrdinary())return;
   if(type==='todo')showOpenTodos.value=!showOpenTodos.value;
-  else if(type==='completed')showCompleted.value=!showCompleted.value;
+  else if(type==='completed') { if (!showCompleted.value) completedLimit.value = 10; showCompleted.value=!showCompleted.value; }
   else expandedCategories.value[type]=!expandedCategories.value[type];
 }
 async function toggleSort(type) {
@@ -393,7 +428,11 @@ function openNoteDetails(item) {
 async function saveNoteConversion() {
   try {
     const nextItems = moveNote(workbenchData.value.items, selectedNoteId.value, conversionType.value, conversionDate.value);
-    if (await saveTasks(nextItems)) selectedNoteId.value = null;
+    const targetType = conversionType.value;
+    if (await saveTasks(nextItems)) {
+      selectedNoteId.value = null;
+      if (targetType === 'todo') notify('已录入待办');
+    }
   } catch (error) {
     message.value = error.message;
   }
@@ -413,7 +452,9 @@ async function saveOrdinaryItem(nextItem, editingBase) {
   if (editingBase && !equal(workbenchData.value.items.find(item => item.id === nextItem.id), editingBase)) {
     message.value = '此事项在编辑期间发生变化，输入保留，请核对新内容。'; return false;
   }
-  if (equal(editingBase,nextItem)) return true;
+  const previous = workbenchData.value.items.find(item => item.id === nextItem.id);
+  if (!previous) return false;
+  if (equal(previous, nextItem)) return true;
   const saved = await saveTasks(workbenchData.value.items.map(item => item.id === nextItem.id ? nextItem : item));
   if (saved) notify('修改已保存到本机');
   return saved;
@@ -680,17 +721,21 @@ async function confirmImport() {
     </template>
     <!-- 父组件用稳定 id 作为 key，子组件发出事件后由父组件更新记录，不把数组序号当事项身份。 -->
     <section class="panel completed-section">
-      <button type="button" class="category-expand" :aria-expanded="showCompleted" :aria-label="`${showCompleted ? '收起' : '展开'}已完成`" @click="toggleCategory('completed')"><CategoryChevron :expanded="showCompleted" /><span>已完成</span><small>{{ completedCount }}</small></button>
+      <button id="completed-heading" type="button" class="category-expand" :aria-expanded="showCompleted" :aria-label="`${showCompleted ? '收起' : '展开'}已完成`" @click="toggleCategory('completed')"><CategoryChevron :expanded="showCompleted" /><span>已完成</span><small>{{ completedCount }}</small></button>
       <div v-if="showCompleted">
         <p v-if="!completedCount" class="empty">还没有已完成的事项。</p>
-        <OrdinaryItem v-for="task in completedTodos" :key="task.id" :id="'completed-' + task.id" :class="{ located:highlighted === task.id }" :ref="el=>registerEditor(task.id,el)" :item="task" :can-edit="canEditLocal" :expanded="selectedTodoId === task.id" :save-item="saveOrdinaryItem" @editing="protectOrdinary" @expand="expandOrdinary(task)" @complete="toggleTask(task.id)" @delete="deleteItem(task.id)" />
-        <article v-for="item in completedProjects" :key="item.id" :id="'completed-' + item.id" :class="{ located:highlighted === item.id }" class="category-row completed-project">
+        <OrdinaryItem v-for="task in visibleCompletedTodos" :key="task.id" :id="'completed-' + task.id" :class="{ located:highlighted === task.id }" :ref="el=>registerEditor(task.id,el)" :item="task" :can-edit="canEditLocal" :expanded="selectedTodoId === task.id" :save-item="saveOrdinaryItem" @editing="protectOrdinary" @expand="expandOrdinary(task)" @complete="toggleTask(task.id)" @delete="deleteItem(task.id)" />
+        <article v-for="item in visibleCompletedProjects" :key="item.id" :id="'completed-' + item.id" :class="{ located:highlighted === item.id }" class="category-row completed-project">
           <div class="project-heading-row">
             <div class="item-line"><button type="button" class="category-title project-list-trigger" :aria-label="item.title ? undefined : '打开已完成的空名称项目详情'" :aria-expanded="selectedProjectId === item.id" @click="toggleProjectDetails(item.id)">{{ item.title }}<span v-for="tag in item.tags" :key="tag" class="project-user-tag">#{{ tag.replace(/^#+/, '') }}</span></button><span v-if="item.priority === true" class="urgent-mark item-status">优先处理</span></div>
             <PinnedMark :item="item" />
           </div>
           <p class="project-next-step">{{ item.nextStep }}</p>
         </article>
+        <div class="completed-actions">
+          <button type="button" class="secondary" @click="collapseCompleted">收起已完成</button>
+          <button v-if="completedLimit < completedCount" type="button" class="secondary" @click="completedLimit += 10">显示更多</button>
+        </div>
       </div>
     </section>
     <footer class="workbench-footer">
@@ -704,6 +749,13 @@ async function confirmImport() {
         <div class="footer-label">启动动画<QuickHelp label="启动动画说明">开关在下次进入时生效，每次会话播放一次。</QuickHelp></div>
         <div class="footer-actions"><button type="button" role="switch" aria-label="启动动画" :aria-checked="splashEnabled" @click="toggleSplashPreference">{{ splashEnabled ? '开启' : '关闭' }}</button></div>
       </div>
+      <div class="footer-row theme-row">
+        <span class="footer-label" id="theme-label">夜间模式</span>
+        <div class="footer-actions theme-options" role="group" aria-labelledby="theme-label">
+          <button v-for="option in [{ value: 'system', label: '跟随系统' }, { value: 'light', label: '日间' }, { value: 'dark', label: '夜间' }]" :key="option.value" type="button" :aria-pressed="themeMode === option.value" @click="selectTheme(option.value)">{{ option.label }}</button>
+        </div>
+      </div>
+      <p v-if="themeError" class="error" role="alert">{{ themeError }}</p>
       <p v-if="splashPreferenceError" class="error" role="alert">{{ splashPreferenceError }}</p>
       <div class="footer-row">
         <div class="footer-label">云端连接<QuickHelp label="云端连接说明">云端仅供所有者连接。连接后，支持的事项会自动同步，日常无需手动上传；本机功能无需登录。</QuickHelp></div>

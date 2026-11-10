@@ -65,13 +65,13 @@ const summaryId = useId();
 <style scoped>
 .sync-control { position:relative; flex:0 0 44px; width:44px; height:44px; overflow:visible; }
 header > .sync-control { position:absolute; top:-13px; right:0; }
-.sync-symbol { position:relative; width:44px; height:44px; display:grid; place-items:center; padding:0; border:0; border-radius:50%; background:#e7efe9; color:#65766e; }
+.sync-symbol { position:relative; width:44px; height:44px; display:grid; place-items:center; padding:0; border:0; border-radius:50%; background:var(--date-from); color:var(--muted); }
 .sync-symbol svg { display:block; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
 .sync-symbol .sync-main { width:21px; height:21px; }
-.sync-badge { position:absolute; right:0; bottom:0; display:grid; place-items:center; width:17px; height:17px; border-radius:50%; background:white; box-shadow:0 0 0 2px #f5f4ef; }
+.sync-badge { position:absolute; right:0; bottom:0; display:grid; place-items:center; width:17px; height:17px; border-radius:50%; background:var(--panel-1); box-shadow:0 0 0 2px var(--page); }
 .sync-badge svg { width:12px; height:12px; }
-.failed { color:#a13d34; }
-.pending,.conflict { color:#925c16; }
-.ready { color:#27724d; }
-.sync-summary { position:absolute; z-index:5; right:0; top:calc(100% + 6px); width:max-content; max-width:min(18rem,calc(100vw - 40px)); overflow-wrap:anywhere; padding:10px 12px; background:white; border:1px solid #d3ddd5; border-radius:10px; color:#243d36; font-size:.875rem; }
+.failed { color:var(--danger-2); }
+.pending,.conflict { color:var(--warning-2); }
+.ready { color:var(--positive); }
+.sync-summary { position:absolute; z-index:5; right:0; top:calc(100% + 6px); width:max-content; max-width:min(18rem,calc(100vw - 40px)); overflow-wrap:anywhere; padding:10px 12px; background:var(--panel-1); border:1px solid var(--line-4); border-radius:10px; color:var(--ink); font-size:.875rem; }
 </style>

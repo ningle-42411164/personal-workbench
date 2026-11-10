@@ -22,9 +22,9 @@ watch(query, value => { if (!value.trim()) completedOnly.value = false; });
 </template>
 <style scoped>
 .global-search { padding-top:16px; }
-.global-search input[type=search] { min-height:44px; font-size:16px; border:1px solid #a8b9af; border-radius:8px; background:white; margin:0; }
+.global-search input[type=search] { min-height:44px; font-size:16px; border:1px solid var(--input-border); border-radius:8px; background:var(--input); margin:0; }
 .search-filter { display:flex; align-items:center; gap:6px; min-height:44px; }
 .search-results { list-style:none; padding:0; margin:0; }
-.search-results button { display:block; width:100%; min-height:44px; padding:9px; text-align:left; background:transparent; color:#243d36; overflow-wrap:anywhere; }
+.search-results button { display:block; width:100%; min-height:44px; padding:9px; text-align:left; background:transparent; color:var(--ink); overflow-wrap:anywhere; }
 .search-results small { display:block; margin:0; }
 </style>

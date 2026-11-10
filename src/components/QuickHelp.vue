@@ -60,9 +60,9 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .quick-help { display:inline-flex; position:relative; flex:0 0 16px; align-self:center; }
-.quick-help button { position:relative; display:grid; place-items:center; width:16px; height:16px; min-height:0; padding:0; background:transparent; color:#718078; line-height:1; }
+.quick-help button { position:relative; display:grid; place-items:center; width:16px; height:16px; min-height:0; padding:0; background:transparent; color:var(--muted-4); line-height:1; }
 .quick-help button svg { display:block; width:13px; height:13px; }
 @media (pointer:coarse) { .quick-help button::after { content:""; position:absolute; inset:-14px -8px -14px -2px; } }
-[role=tooltip] { position:absolute; bottom:100%; left:-3.5rem; z-index:5; width:max-content; max-width:min(16rem,65vw); padding:10px 12px; border:1px solid #d3ddd5; border-radius:10px; background:white; color:#243d36; font-weight:400; text-align:left; font-size:.875rem; line-height:1.5; overflow-wrap:anywhere; }
+[role=tooltip] { position:absolute; bottom:100%; left:-3.5rem; z-index:5; width:max-content; max-width:min(16rem,65vw); padding:10px 12px; border:1px solid var(--line-4); border-radius:10px; background:var(--panel-1); color:var(--ink); font-weight:400; text-align:left; font-size:.875rem; line-height:1.5; overflow-wrap:anywhere; }
 [role=tooltip].below { top:100%; bottom:auto; left:-4.5rem; max-width:min(18rem,calc(100vw - 90px)); }
 </style>

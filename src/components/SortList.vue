@@ -38,9 +38,9 @@ onBeforeUnmount(()=>{sorter?.destroy();window.removeEventListener('blur',cancel)
       <span aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 2h12M8 14V5m-4 4 4-4 4 4"/></svg></span>
     </button></div></div></template>
 <style scoped>
-.sort-row{display:flex;align-items:center;gap:8px;min-height:48px;border-top:1px solid #dce5dd;user-select:none;background:#fff}.sort-row>span:nth-child(2){flex:1;overflow-wrap:anywhere}.sort-handle{display:grid;place-items:center;width:44px;height:44px;touch-action:none;cursor:grab}.grabbed{box-shadow:0 4px 14px #243d3640;background:#edf4ed}.paused{color:#52605a}
+.sort-row{display:flex;align-items:center;gap:8px;min-height:48px;border-top:1px solid var(--line-5);user-select:none;background:var(--panel)}.sort-row>span:nth-child(2){flex:1;overflow-wrap:anywhere}.sort-handle{display:grid;place-items:center;width:44px;height:44px;touch-action:none;cursor:grab}.grabbed{box-shadow:0 4px 14px #243d3640;background:var(--positive-bg-2)}.paused{color:var(--muted-5)}
 .pin-control { flex:0 0 44px; height:44px; display:grid; place-items:center; padding:0; background:transparent; }
-.pin-control span { box-sizing:border-box; width:30px; height:30px; border-radius:6px; border:1px solid #a3aba7; background:#f0f1ef; color:#424c47; display:grid; place-items:center; }
-.pin-control[aria-pressed="true"] span { background:#244d43; border-color:#244d43; color:white; }
+.pin-control span { box-sizing:border-box; width:30px; height:30px; border-radius:6px; border:1px solid var(--line-6); background:var(--secondary-5); color:var(--muted-6); display:grid; place-items:center; }
+.pin-control[aria-pressed="true"] span { background:var(--primary); border-color:var(--primary); color:var(--primary-ink); }
 .pin-control svg { width:16px; height:16px; }
 </style>

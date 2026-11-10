@@ -76,7 +76,7 @@ function handleLoad() {
   inset: 0;
   height: 100vh;
   height: 100dvh;
-  background-color: #f5f4ef;
+  background-color: var(--page);
   background-position: center;
   background-size: cover;
   background-repeat: no-repeat;

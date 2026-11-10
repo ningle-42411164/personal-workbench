@@ -39,8 +39,8 @@ const remaining = item => daysUntil(item.targetDate, props.today);
 </template>
 <style scoped>
 .day-deck {
-  --date-ink:#243d36; --date-muted:#65766e; --date-accent:#244d43; --date-border:transparent;
-  --date-fill:linear-gradient(135deg,#e7efe9,#f5f4ef);
+  --date-ink:var(--ink); --date-muted:var(--muted); --date-accent:var(--date-count); --date-border:transparent;
+  --date-fill:linear-gradient(135deg,var(--date-from),var(--date-to));
 }
 .day-face,.peek { box-sizing:border-box; min-width:0; border:1px solid var(--date-border); color:var(--date-ink); overflow-wrap:anywhere; }
 .day-face { position:relative; min-height:164px; padding:16px; border-radius:14px; text-align:left; background:var(--date-fill); }
@@ -73,7 +73,7 @@ const remaining = item => daysUntil(item.targetDate, props.today);
 .stack .day-face small { margin-top:24px; }
 .stack .days { justify-content:center; }
 .stack .days b { font-size:2.625rem; }
-.prev,.next { position:absolute; top:50%; transform:translateY(-50%); display:grid; place-items:center; width:44px; height:44px; min-height:0; padding:0; border-radius:50%; background:white; color:var(--date-accent); box-shadow:0 2px 9px #243d3610; }
+.prev,.next { position:absolute; top:50%; transform:translateY(-50%); display:grid; place-items:center; width:44px; height:44px; min-height:0; padding:0; border-radius:50%; background:var(--panel-1); color:var(--date-accent); box-shadow:0 2px 9px #243d3610; }
 .prev { left:8px; } .next { right:8px; }
 .prev svg,.next svg { display:block; width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
 .page { display:block; margin:14px 0 0; color:var(--date-muted); font-size:.75rem; text-align:center; }
