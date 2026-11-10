@@ -13,7 +13,7 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
     <!-- Vue 脚本运行前先用静态启动层遮住页面，避免首帧出现工作台；组件接管后移除它。 -->
     <style>
-      html, body { background: #f5f4ef; }
+      html, body { background: var(--page, #f5f4ef); }
       #boot-splash { display: none; }
       .splash-pending main { visibility: hidden; }
       .splash-pending #boot-splash {
