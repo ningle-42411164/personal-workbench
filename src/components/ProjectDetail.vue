@@ -3,12 +3,15 @@ import { computed, nextTick, reactive, ref, toRef } from 'vue';
 import { projectEditableFields } from '../data/workbenchData.js';
 import { normalizeUserTags } from '../data/userTags.js';
 import { createProjectEditor } from '../data/projectEditor.js';
+import FavoriteStar from './FavoriteStar.vue';
+import HistoryBody from './HistoryBody.vue';
 
 // 详情读取父组件的项目；编辑先放进 draft，保存成功后由父组件替换项目，props 随之更新。
 const props = defineProps({
   project: { type: Object, required: true },
   canEdit: { type: Boolean, required: true },
   saveProject: { type: Function, required: true },
+  saveFavorite: { type: Function, required: true },
   deleteProject: { type: Function, required: true },
   availableTags: { type: Array, default: () => [] },
 });
@@ -19,6 +22,12 @@ const editingField = toRef(editing, 'field');
 const draft = toRef(editing, 'draft');
 const inputControl = ref(null);
 const showAllUpdates = ref(false);
+const expandedHistory = reactive({});
+async function favoriteProject() {
+  if (!await editor.commit()) return false;
+  await nextTick();
+  return props.saveFavorite(props.project);
+}
 const error = toRef(editing, 'error');
 const editor = createProjectEditor({
   state: editing, getProject: () => props.project, canEdit: () => props.canEdit,
@@ -88,7 +97,7 @@ function formatTime(value) {
   <!-- 详情内部点击不触发外壳遮罩关闭；所有关闭请求交给外壳先保存再离开。 -->
   <div class="project-detail" @click.stop>
     <div class="project-fields">
-      <div v-for="field in fields" :key="field.key" class="project-field-row">
+      <div v-for="field in fields" :key="field.key" class="project-field-row" :class="{'has-favorite':field.key === 'title' && project.status === 'done'}">
         <button type="button" class="project-field-label" :disabled="!canEdit || editing.busy" :aria-expanded="editingField === field.key" @click="beginEdit(field)">{{ field.label }}</button>
         <form v-if="editingField === field.key" class="project-field-editor project-edit" @submit.prevent="saveField">
           <input v-if="field.input === 'text' || field.input === 'date'" :ref="el => inputControl = el" v-model="draft" :type="field.input" :maxlength="field.key === 'title' ? 150 : undefined" :aria-label="field.label" :disabled="!canEdit || editing.busy">
@@ -104,6 +113,7 @@ function formatTime(value) {
           <div class="form-buttons"><button type="button" class="secondary" :disabled="editing.busy" @click="cancelEdit">取消</button><button :disabled="!canEdit || editing.busy">{{ editing.busy ? '正在保存…' : '保存' }}</button></div>
         </form>
         <button v-else type="button" class="project-field-value" :disabled="!canEdit || editing.busy" :aria-label="`编辑${field.label}`" @click="beginEdit(field)">{{ displayValue(field.key) }}<time v-if="field.key === 'status' && project.completedAt" :datetime="project.completedAt">（完成于 {{ formatTime(project.completedAt) }}）</time></button>
+        <FavoriteStar v-if="field.key === 'title' && project.status === 'done'" :item="project" :disabled="!canEdit || editing.busy" :save-favorite="favoriteProject" />
       </div>
     </div>
       <div class="project-history">
@@ -113,7 +123,7 @@ function formatTime(value) {
           <li v-for="record in visibleHistory" :key="record.id">
             <span class="history-node" aria-hidden="true">{{ record.kind === 'archive' ? '◷' : record.field === 'nextStep' ? '→' : '·' }}</span>
             <div><div class="history-heading"><strong v-if="historyLabel(record)">{{ historyLabel(record) }}</strong><time :datetime="record.createdAt">{{ record.kind === 'archive' ? '留档于 ' : '' }}{{ formatTime(record.createdAt) }}</time></div>
-              <p>{{ record.content || (record.kind ? '已清空' : '当前情况已清空') }}</p>
+              <HistoryBody :content="record.content || (record.kind ? '已清空' : '当前情况已清空')" :expanded="expandedHistory[record.id] === true" @toggle="expandedHistory[record.id] = !expandedHistory[record.id]" />
             </div>
           </li>
         </ol>

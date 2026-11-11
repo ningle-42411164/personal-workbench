@@ -9,6 +9,26 @@ import { readGithubIdentity, escapeHtml, handleAuthorization } from '../src/auth
 import { sqliteD1 } from './sqlite-d1.js';
 
 const base = 'https://workbench.test';
+
+test('收藏字段经 REST 保存与现有 MCP 更新保留，旧无字段请求仍兼容', async t => {
+  const service=setup(t);
+  const old=await service.create({requestId:'favorite-old-create',type:'project',title:'旧客户端项目'});
+  const completed=await service.updateProject({id:old.item.id,requestId:'favorite-complete',expectedVersion:old.version,fields:{status:'done'}});
+  const item={...completed.item,favorite:true};
+  const response=await handleApi(request(`/api/sync/items/${item.id}`,{requestId:'favorite-sync-write',expectedVersion:completed.version,item},'PUT'),service,base);
+  assert.equal(response.status,200);const saved=await response.json();assert.equal(saved.item.favorite,true);
+  assert.deepEqual(saved.item.updates,completed.item.updates);
+  const client=new Client({name:'favorite-compatibility',version:'1.0.0'});
+  await client.connect(new StreamableHTTPClientTransport(new URL(base+'/mcp'),{fetch:(url,init)=>handleApi(new Request(url,init),service,base)}));
+  t.after(()=>client.close());
+  const updated=await client.callTool({name:'update_project',arguments:{id:item.id,requestId:'favorite-mcp-rename',expectedVersion:saved.version,fields:{title:'MCP改名保留收藏'}}});
+  assert.notEqual(updated.isError,true);assert.equal(updated.structuredContent.item.favorite,true);
+  assert.deepEqual(updated.structuredContent.item.updates,item.updates);
+  const read=await client.callTool({name:'get_project',arguments:{id:item.id}});
+  assert.equal(read.structuredContent.item.favorite,true);
+  assert.equal((await service.getItem({id:item.id})).item.favorite,true);
+});
+
 function setup(t, scopes = [READ_SCOPE, WRITE_SCOPE]) {
   const db = sqliteD1(); t.after(() => db.close());
   return new WorkbenchService(new D1Store(db, '275953771'), { id: '275953771', scopes });

@@ -343,3 +343,14 @@ input:not([type=checkbox]), select, .project-edit textarea { background:var(--in
 .tag-rule-list li { display:flex; align-items:center; gap:8px; justify-content:space-between; border-bottom:1px solid var(--line); }
 .tag-rule-list span { min-width:0; overflow-wrap:anywhere; }
 .tag-rule-list button { min-height:44px; flex:none; }
+
+/* 收藏入口占独立右列；已完成排序不复用未完成的置顶规则。 */
+.todo-row > .favorite-slot { grid-area:1 / 3; }
+.project-dialog .project-field-row.has-favorite { grid-template-columns:100px minmax(0,1fr) 44px; }
+.project-field-row.has-favorite > .favorite-slot { grid-column:3; grid-row:1; }
+.project-dialog .has-favorite .project-field-editor { grid-column:2; }
+@media (max-width:480px) {
+  .project-dialog .project-field-row.has-favorite { grid-template-columns:minmax(0,1fr) 44px; }
+  .project-field-row.has-favorite > .favorite-slot { grid-column:2; grid-row:1; }
+  .project-dialog .has-favorite .project-field-value, .project-dialog .has-favorite .project-field-editor { grid-column:1; }
+}

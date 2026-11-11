@@ -1,7 +1,7 @@
 <script setup>
 defineProps({ state: { type: Object, required: true } });
 defineEmits(['edit-project']);
-const types = { project: '项目', todo: '一次性待办', note: '随笔', routine: '日常持续', importantDate: '重要日', waiting: '等待中', shopping: '购物', creation: '娱乐/创作' };
+const types = { project: '项目', todo: '待办', note: '随笔', routine: '日常持续', importantDate: '重要日', waiting: '等待中', shopping: '购物', creation: '娱乐/创作' };
 const statuses = { active: '进行中', paused: '暂停中', done: '已完成' };
 </script>
 

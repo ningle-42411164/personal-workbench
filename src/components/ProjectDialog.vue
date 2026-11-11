@@ -3,7 +3,7 @@ import { ref } from 'vue';
 import ProjectDetail from './ProjectDetail.vue';
 import QuickHelp from './QuickHelp.vue';
 import ProjectCard from './ProjectCard.vue';
-const props = defineProps({ project: { type: Object, required: true }, canEdit: { type: Boolean, required: true }, saveProject: { type: Function, required: true }, deleteProject: { type: Function, required: true }, availableTags: { type: Array, default: () => [] } });
+const props = defineProps({ project: { type: Object, required: true }, canEdit: { type: Boolean, required: true }, saveProject: { type: Function, required: true }, saveFavorite: { type: Function, required: true }, deleteProject: { type: Function, required: true }, availableTags: { type: Array, default: () => [] } });
 const emit = defineEmits(['close']);
 const detail = ref(null);
 const closing = ref(false);
@@ -20,7 +20,7 @@ defineExpose({ saveBeforeLeave });
 <template>
   <ProjectCard title="项目详情" :request-close="requestClose">
     <template #hint><QuickHelp label="项目编辑提示" below>修改后切换字段或关闭会先保存<br>保存失败时保留输入<br>点“取消”只放弃当前未提交修改</QuickHelp></template>
-      <ProjectDetail ref="detail" :project="props.project" :can-edit="canEdit" :available-tags="availableTags" :save-project="saveProject" :delete-project="deleteProject" @close="requestClose" />
+      <ProjectDetail ref="detail" :project="props.project" :can-edit="canEdit" :available-tags="availableTags" :save-project="saveProject" :save-favorite="saveFavorite" :delete-project="deleteProject" @close="requestClose" />
 
   </ProjectCard>
 </template>

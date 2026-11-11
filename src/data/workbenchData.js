@@ -79,6 +79,9 @@ export function validateWorkbenchData(data) {
     if (item.type === 'importantDate' && !isCalendarDate(item.targetDate)) {
       throw new Error(`${position}的目标日期不正确。`);
     }
+    if (item.favorite !== undefined && (typeof item.favorite !== 'boolean' || ![...COMPLETABLE_TYPES, 'project'].includes(item.type))) {
+      throw new Error(`${position}的收藏状态不正确。`);
+    }
     if (item.priority !== undefined && typeof item.priority !== 'boolean') {
       throw new Error(`${position}的优先处理状态不正确。`);
     }
@@ -269,6 +272,7 @@ export function moveNote(items, id, type, date, now = new Date().toISOString()) 
     : type === 'importantDate' ? createImportantDate(note.title, date, now)
     : createSimpleItem(type, note.title, now);
   Object.assign(target, { id, title:note.title, createdAt: note.createdAt, tags: [...note.tags] });
+  if (note.favorite !== undefined && [...COMPLETABLE_TYPES, 'project'].includes(target.type)) target.favorite = note.favorite;
   if (note.pinned !== undefined) target.pinned = note.pinned;
   if (note.priority !== undefined) target.priority = note.priority;
   target.rank = frontRank(items, target);

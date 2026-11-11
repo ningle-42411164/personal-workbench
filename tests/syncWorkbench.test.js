@@ -11,9 +11,33 @@ import { sqliteD1 } from '../services/workbench-api/test/sqlite-d1.js';
 import { handleApi } from '../services/workbench-api/src/http.js';
 import { createConnectionRecovery } from '../src/cloud/connectionRecovery.js';
 import { syncDisplayMode } from '../src/sync/syncDisplay.js';
+import { toggleFavorite } from '../src/data/completedItems.js';
 
 const at = '2026-10-26T08:00:00.000Z';
 const data = items => ({ schemaVersion: 2, items });
+
+test('收藏通过严格 REST 同步跨端保留，旧队列不覆盖新收藏，项目更新保留收藏且不新增收藏历史', async t => {
+  const s=setup(t);await s.store.read();await s.store.setEnabled(true);
+  const project=updateProject(createProject('收藏跨端项目',{},at),{status:'done'},at);
+  await add(s.store,project);await s.engine.run();
+  const old=(await s.service.getItem({id:project.id}));
+  await change(s.store,project.id,item=>toggleFavorite(item));await s.engine.run();
+  let remote=await s.service.getItem({id:project.id});assert.equal(remote.item.favorite,true);
+  assert.deepEqual(remote.item.updates,project.updates);
+  await assert.rejects(s.service.sync({id:project.id,requestId:'stale-old-favorite-request',expectedVersion:old.version,item:{...old.item,title:'旧客户端排队修改'}}),{code:'VERSION_CONFLICT'});
+  const other=createSyncStore({indexedDB:new IDBFactory(),storage:memoryStorage(),ownerPhone:true});
+  await other.read();await other.setEnabled(true);
+  const engine=createSyncEngine({store:other,api:s.api,schedule:()=>1,cancel:()=>{}});
+  t.after(async()=>{engine.stop();await other.close();});
+  await engine.run();assert.equal((await other.read()).data.items[0].favorite,true);
+  await s.service.updateProject({id:project.id,requestId:'existing-mcp-update-preserves-favorite',expectedVersion:remote.version,fields:{status:'active'}});
+  await s.engine.run();let local=(await s.store.read()).data.items[0];
+  assert.equal(local.favorite,true);assert.equal(local.status,'active');assert.deepEqual(local.updates,project.updates);
+  await change(s.store,project.id,item=>updateProject(item,{status:'done'}));await s.engine.run();await engine.run();
+  local=(await other.read()).data.items[0];assert.equal(local.favorite,true);assert.equal(local.status,'done');
+  await change(other,project.id,item=>toggleFavorite(item));await engine.run();await s.engine.run();
+  assert.equal((await s.store.read()).data.items[0].favorite,false);
+});
 
 test('授权已恢复但同步回执迟到：三秒提示一次，队列保留到有效回执后才显示已同步', async t => {
   const s = setup(t); await s.store.read(); await s.store.setEnabled(true);

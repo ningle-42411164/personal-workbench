@@ -1,6 +1,7 @@
 <script setup>
 import { nextTick, ref, onBeforeUnmount } from 'vue';
 import PinnedMark from './PinnedMark.vue';
+import FavoriteStar from './FavoriteStar.vue';
 import { renameItem } from '../data/workbenchData.js';
 
 const props = defineProps({
@@ -9,6 +10,7 @@ const props = defineProps({
   canEdit: { type: Boolean, required: true },
   ellipsis: { type: Boolean, default: false },
   saveItem: { type: Function, required: true },
+  saveFavorite: Function,
 });
 const emit = defineEmits(['expand', 'complete', 'delete', 'editing', 'return-note']);
 const editing = ref(false);
@@ -63,7 +65,8 @@ onBeforeUnmount(() => emit('editing', props.item.id, null));
       </button>
       <div v-if="item.priority === true" class="todo-status"><span v-if="item.priority === true" class="urgent-mark">优先处理</span></div>
     </div>
-    <PinnedMark :item="item" />
+    <FavoriteStar v-if="item.done && expanded" :item="item" :disabled="!canEdit || editing || saving" :save-favorite="saveFavorite" />
+    <PinnedMark v-else-if="!item.done" :item="item" />
     <div v-if="expanded" class="todo-detail">
       <form v-if="editing" class="ordinary-name-editor" @submit.prevent="saveName">
         <input ref="inputControl" v-model="draft" aria-label="事项名称" maxlength="150" :disabled="!canEdit">

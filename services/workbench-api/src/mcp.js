@@ -8,7 +8,7 @@ import { z } from 'zod';
 // structuredContent 同时声明 outputSchema；描述既有返回，不改变事项业务格式。
 const itemOutput = z.object({
   id: z.string(), type: z.string(), title: z.string(), tags: z.array(z.string()),
-  createdAt: z.string(), updatedAt: z.string(), priority: z.boolean().optional(),
+  createdAt: z.string(), updatedAt: z.string(), priority: z.boolean().optional(), favorite: z.boolean().optional(),
   urgent: z.boolean().optional(), done: z.boolean().optional(), completedAt: z.string().nullable().optional(),
   status: z.string().nullable().optional(), startDate: z.string().nullable().optional(), dueDate: z.string().nullable().optional(),
   targetDate: z.string().optional(), currentSituation: z.string().optional(), nextStep: z.string().optional(),
