@@ -25,7 +25,7 @@ export function createConnectionRecovery({ auth, onFallback = () => {}, schedule
           if (status.state === 'expired') fallback();
           return;
         }
-        cancel(noticeTimer);
+        // 授权恢复不代表同步请求已得到有效响应；计时覆盖同步等待，统一在 finally 清理。
         const result = await synchronize();
         if (['failed', 'offline'].includes(result?.phase)) throw new Error('同步连接暂不可用');
         if (['login', 'permission'].includes(result?.phase)) { fallback(); return; }
