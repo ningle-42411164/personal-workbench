@@ -25,7 +25,7 @@ import SyncSettings from './components/SyncSettings.vue';
 import { useSyncWorkbench } from './sync/useSyncWorkbench.js';
 import { equal } from './sync/syncStore.js';
 import { isKnownTestRecord } from './sync/knownTestRecords.js';
-import { useCloudWorkbench } from './cloud/useCloudWorkbench.js';
+import { useCloudWorkbench, fallbackNotice } from './cloud/useCloudWorkbench.js';
 import { normalizeUserTags, availableUserTags } from './data/userTags.js';
 import { readSplashEnabled, writeSplashEnabled } from './data/splashPreference.js';
 import { COMPLETABLE_TYPES, moveNote, createImportantDate, createNote, createRoutine, createSimpleItem, createTodo, emptyWorkbenchData, isCalendarDate, readWorkbenchData, removeItem, renameItem, toggleTodo, validateWorkbenchData } from './data/workbenchData.js';
@@ -252,6 +252,7 @@ const projectCreate = ref(null);
 const sorting = ref(null), successMessages = ref(null), highlighted = ref(null);
 let highlightTimer;
 const notify = (text, target) => successMessages.value?.push(text, target);
+watch(fallbackNotice, () => notify('已转为本地模式'));
 const creationText = { note:'随笔+1', todo:'待办+1', project:'已创建新项目！' };
 function completedMessage(item, done) {
   if (done) notify(`已完成「${item.title}」`, { id:item.id, type:item.type });

@@ -2,7 +2,7 @@ import { shallowRef, onBeforeUnmount } from 'vue';
 import { createSyncStore } from './syncStore.js';
 import { createSyncApi } from './syncApi.js';
 import { createSyncEngine } from './syncEngine.js';
-import { sharedCloudAuth } from '../cloud/useCloudWorkbench.js';
+import { sharedCloudAuth, connectionRecovery } from '../cloud/useCloudWorkbench.js';
 import { isOwnerPhoneTarget, prepareOwnerPhoneSync } from './ownerPhone.js';
 import { resolveConflict } from './resolveConflict.js';
 
@@ -12,10 +12,11 @@ export function useSyncWorkbench() {
   const ownerPhone = isOwnerPhoneTarget();
   const store = createSyncStore({ ownerPhone });
   const api = createSyncApi({ auth: sharedCloudAuth });
-  const engine = createSyncEngine({ store, api,
+  const engine = createSyncEngine({ store, api, managed: true, onWake: () => connectionRecovery.wake(),
     beforeRun: () => prepareOwnerPhoneSync(store, sharedCloudAuth),
     onStatus: next => { status.value = { ...status.value, ...next }; },
   });
+  connectionRecovery.setSynchronize(async () => { await engine.run(); return status.value; });
   const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('personal-workbench.sync.v1') : null;
   const unsubscribe = store.subscribe(next => { snapshot.value = next; channel?.postMessage('changed'); });
   const fail = error => { status.value = { ...status.value, phase: 'failed', message: `同步失败；待同步修改保留在本机。${error.message || ''}` }; };
@@ -30,20 +31,16 @@ export function useSyncWorkbench() {
       engine.interrupt(); status.value = { ...status.value, phase: 'login', message: '连接已退出或失效，待同步修改保留；重新登录后自动继续。' };
     }
     if (['disconnected', 'expired'].includes(next.state)) previouslyConnected = false;
-    if (next.state === 'connected') { previouslyConnected = true; engine.wake(); }
+    if (next.state === 'connected') previouslyConnected = true;
   });
-  const resume = async () => {
-    if (document.visibilityState === 'hidden') return;
-    try { snapshot.value = await store.read(); engine.wake(); } catch (error) { fail(error); }
-  };
   const offline = () => { engine.interrupt(); status.value = { ...status.value, phase: 'offline', message: '离线：本机可以继续编辑，待同步修改将在联网后自动补传。' }; };
-  window.addEventListener('online', resume);
+
   window.addEventListener('offline', offline);
-  document.addEventListener('visibilitychange', resume);
+
   onBeforeUnmount(() => {
-    engine.stop(); unsubscribe(); unsubscribeAuth(); channel?.close();
-    window.removeEventListener('online', resume); window.removeEventListener('offline', offline);
-    document.removeEventListener('visibilitychange', resume); void store.close();
+    connectionRecovery.setSynchronize(async () => ({ phase: 'paused' })); engine.stop(); unsubscribe(); unsubscribeAuth(); channel?.close();
+    window.removeEventListener('offline', offline);
+    void store.close();
   });
   return {
     snapshot, status, ownerPhone,

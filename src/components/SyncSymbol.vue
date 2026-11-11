@@ -1,15 +1,11 @@
 <script setup>
 import {computed,ref,useId,onMounted,onBeforeUnmount} from 'vue';
 const props=defineProps({snapshot:Object,status:Object,auth:Object});
-const online=ref(navigator.onLine);
-const refresh=()=>{online.value=navigator.onLine};
-onMounted(()=>{window.addEventListener('online',refresh);window.addEventListener('offline',refresh)});
-onBeforeUnmount(()=>{window.removeEventListener('online',refresh);window.removeEventListener('offline',refresh)});
 const count=computed(()=>Object.keys(props.snapshot?.dirty??{}).length);
 const conflicts=computed(()=>Object.keys(props.snapshot?.blocked??{}).length);
 const mode=computed(()=>{
   if(!props.snapshot?.enabled)return 'local';
-  if(!online.value || props.status.phase==='offline')return 'offline';
+  if(props.status.phase==='offline')return 'offline';
   if(conflicts.value)return 'conflict';
   if(['failed','login','permission'].includes(props.status.phase))return 'failed';
   if(props.status.phase==='syncing')return 'syncing';

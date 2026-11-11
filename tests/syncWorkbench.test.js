@@ -9,9 +9,40 @@ import { WorkbenchService, READ_SCOPE, WRITE_SCOPE } from '../services/workbench
 import { D1Store } from '../services/workbench-api/src/store.js';
 import { sqliteD1 } from '../services/workbench-api/test/sqlite-d1.js';
 import { handleApi } from '../services/workbench-api/src/http.js';
+import { createConnectionRecovery } from '../src/cloud/connectionRecovery.js';
 
 const at = '2026-10-26T08:00:00.000Z';
 const data = items => ({ schemaVersion: 2, items });
+
+test('恢复调度器无 online 事件自动补传既有请求，暂停和退出仍阻止发送', async t => {
+  const s = setup(t); await s.store.read(); await s.store.setEnabled(true);
+  const todo = createTodo('隔离自动恢复待办', false, at); await add(s.store, todo);
+  const jobs = new Map(); let sequence = 0, notices = 0;
+  const authState = { state:'connected', remembered:true };
+  const recovery = createConnectionRecovery({
+    auth:{getStatus:()=>authState,restore:async()=>{}}, onFallback:()=>notices++,
+    schedule(fn,ms){ jobs.set(++sequence,{fn,ms}); return sequence; }, cancel(id){jobs.delete(id);},
+  });
+  t.after(()=>recovery.stop());
+  recovery.setSynchronize(async()=>{await s.engine.run();return s.controls.statuses.at(-1);});
+  s.controls.online=false;await recovery.run();
+  const original=(await s.store.read()).outbox[todo.id];assert.ok(original);
+  assert.equal(notices,1);assert.equal([...jobs.values()].at(-1).ms,5000);
+  s.controls.online=true; // 不发送 online 事件，由已安排的定时器发起恢复。
+  [...jobs.values()].at(-1).fn();
+  for(let i=0;i<100 && Object.keys((await s.store.read()).dirty).length;i++) await new Promise(resolve=>setTimeout(resolve,1));
+  assert.deepEqual((await s.store.read()).dirty,{});
+  assert.equal((await s.service.getItem({id:todo.id})).item.title,todo.title);
+  const writes=s.controls.calls.filter(call=>call.method==='PUT');
+  assert.equal(writes[0].body,writes[1].body);
+  await recovery.run();
+  await s.store.setEnabled(false); await change(s.store,todo.id,item=>renameItem(item,'暂停草稿'));
+  const calls=s.controls.calls.length; await recovery.run();assert.equal(s.controls.calls.length,calls);
+  assert.equal((await s.store.read()).enabled,false);
+  await s.store.setEnabled(true);authState.state='disconnected';authState.remembered=false;
+  await recovery.run();assert.equal(s.controls.calls.length,calls);
+  assert.ok((await s.store.read()).dirty[todo.id]);
+});
 function memoryStorage(value = null) { let raw = value; return { getItem: () => raw, setItem: (_key, value) => { raw = value; } }; }
 function setup(t, items = []) {
   const indexedDB = new IDBFactory(), storage = memoryStorage(JSON.stringify(data(items)));
@@ -78,7 +109,7 @@ test('断网编辑、完成和恢复先落盘；重开仓库后补传，保留�
   s.controls.online = false;
   const todo = createTodo('离线虚构待办', true, at); await add(s.store, todo);
   await change(s.store, todo.id, item => toggleTodo(renameItem(item, '离线已改名'), '2026-10-26T08:01:00.000Z'));
-  await s.engine.run(); assert.equal(s.controls.calls.length, 0);
+  await s.engine.run(); assert.equal(s.controls.calls.length, 1); // 实际请求确认断线，保留原队列。
   const reopened = createSyncStore({ indexedDB: s.indexedDB, storage: s.storage }); t.after(() => reopened.close());
   assert.equal((await reopened.read()).data.items[0].done, true);
   s.controls.online = true; await s.engine.run();

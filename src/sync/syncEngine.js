@@ -3,7 +3,7 @@
 import { equal } from './syncStore.js';
 import { linkedIds } from './syncPolicy.js';
 
-export function createSyncEngine({ store, api, beforeRun = () => store.read(), isOnline = () => globalThis.navigator?.onLine !== false, onStatus = () => {}, now = Date.now, schedule = setTimeout, cancel = clearTimeout } = {}) {
+export function createSyncEngine({ store, api, beforeRun = () => store.read(), isOnline = () => globalThis.navigator?.onLine !== false, onStatus = () => {}, now = Date.now, schedule = setTimeout, cancel = clearTimeout, managed = false, onWake = () => {} } = {}) {
   let running, timer, stopped = false, failures = 0, generation = 0, request;
   const publish = (phase, message, extra = {}) => onStatus({ phase, message, ...extra });
   async function run() {
@@ -19,7 +19,7 @@ export function createSyncEngine({ store, api, beforeRun = () => store.read(), i
         let state = await beforeRun();
         if (!active()) return;
         if (!state.enabled) { publish('paused', '自动同步未开启；本机仍可编辑。'); return; }
-        if (!isOnline()) { publish('offline', '离线：待同步修改已保存在本机，联网后自动继续。'); return; }
+        // 以真实请求结果判断可达性，浏览器的 online 状态只是提示。
         // 已拒绝的旧请求不重放；只读取云端以恢复原版本选择入口。
         for (const [id, blocked] of Object.entries(state.blocked)) {
           if (blocked.code !== 'IMMUTABLE_FIELD' || blocked.remote || blocked.resolving || !state.outbox[id]) continue;
@@ -97,12 +97,12 @@ export function createSyncEngine({ store, api, beforeRun = () => store.read(), i
     try { await operation; }
     finally {
       if (running === operation) running = undefined;
-      if (!stopped) timer = schedule(() => { void run(); }, failures ? Math.min(120000, 5000 * 2 ** Math.min(failures - 1, 5)) : 30000);
+      if (!stopped && !managed) timer = schedule(() => { void run(); }, failures ? Math.min(20000, 5000 * 2 ** Math.min(failures - 1, 2)) : 30000);
     }
   }
   return {
     run,
-    wake() { if (stopped) return; cancel(timer); timer = schedule(() => { void run(); }, 250); },
+    wake() { if (stopped) return; if (managed) { onWake(); return; } cancel(timer); timer = schedule(() => { void run(); }, 250); },
     interrupt() { generation++; request?.abort(); },
     stop() { stopped = true; generation++; cancel(timer); request?.abort(); },
   };
