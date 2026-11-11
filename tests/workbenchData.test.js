@@ -280,7 +280,7 @@ test('优先处理标记随分类保存，排序在普通事项之前', () => {
   assert.equal(storage.getItem(STORAGE_KEY), raw);
 });
 
-test('旧项目仍可读取；新项目只在当前情况变化时追加真实时间的历史', () => {
+test('旧项目仍可读取；新项目在两个进展字段变化时追加真实时间的历史', () => {
   const storage = memoryStorage();
   const createdAt = '2026-09-25T10:00:00.000Z';
   const oldProject = { ...createSimpleItem('project', '旧项目', createdAt) };
@@ -302,7 +302,7 @@ test('旧项目仍可读取；新项目只在当前情况变化时追加真实�
   const first = updateProject(oldProject, { ...base, tags: ['代码'], startDate: '2026-09-25', currentSituation: '第一版' }, firstAt);
   const secondAt = '2026-09-25T10:03:00.000Z';
   const second = updateProject(first, { ...projectEditableFields(first), currentSituation: '第二版', nextStep: '验证' }, secondAt);
-  assert.deepEqual(second.updates.map(record => [record.content, record.createdAt]), [['第一版', firstAt], ['第二版', secondAt]]);
+  assert.deepEqual(second.updates.map(record => [record.content, record.createdAt]), [['第一版', firstAt], ['第二版', secondAt], ['验证', secondAt]]);
   assert.equal(second.createdAt, createdAt);
   assert.equal(updateProject(second, projectEditableFields(second), '2026-09-25T10:04:00.000Z'), second);
   writeWorkbenchData({ schemaVersion: 2, items: [second] }, storage);
@@ -348,7 +348,7 @@ test('两种项目入口只生成一次创建记录，不自动补填快速项�
   assert.throws(() => writeWorkbenchData({ schemaVersion: 2, items: [createNote('', now)] }, storage), /格式/);
 });
 
-test('逐字段保存只修改目标字段；仅当前情况变化追加历史', () => {
+test('逐字段保存只修改目标字段；当前情况和下一步分别追加历史', () => {
   const now = '2026-09-26T06:00:00.000Z';
   const project = createProject('项目', {}, now);
   assert.equal(updateProject(project, { title: '项目' }), project);
@@ -358,11 +358,11 @@ test('逐字段保存只修改目标字段；仅当前情况变化追加历史',
   assert.equal(Object.hasOwn(named, 'nextStep'), false);
   assert.deepEqual(named.updates, project.updates);
   const next = updateProject(named, { nextStep: '下一步', tags: ['学习'], startDate: '2026-09-26' });
-  assert.equal(next.updates.length, 1);
+  assert.equal(next.updates.length, 2);
   const first = updateProject(next, { currentSituation: '第一版' }, '2026-09-26T06:02:00.000Z');
   assert.equal(updateProject(first, { currentSituation: '第一版' }), first);
   const second = updateProject(first, { currentSituation: '第二版' }, '2026-09-26T06:03:00.000Z');
-  assert.deepEqual(second.updates.map(record => record.content), ['创建此项目', '第一版', '第二版']);
+  assert.deepEqual(second.updates.map(record => record.content), ['创建此项目', '下一步', '第一版', '第二版']);
   assert.equal(project.updates.length, 1);
   const spacedTitle = { ...project, title: ' 项目 ' };
   assert.equal(updateProject(spacedTitle, { nextStep: '只改下一步' }).title, ' 项目 ');
@@ -371,7 +371,7 @@ test('逐字段保存只修改目标字段；仅当前情况变化追加历史',
   const finished = updateProject(second, { status: 'done' }, finishedAt);
   assert.equal(finished.completedAt, finishedAt);
   assert.equal(updateProject(finished, { status: 'done' }), finished);
-  assert.equal(finished.updates.length, 3);
+  assert.equal(finished.updates.length, 4);
   const storage = memoryStorage();
   writeWorkbenchData({ schemaVersion: 2, items: [finished] }, storage);
   const backup = JSON.parse(JSON.stringify(readWorkbenchData(storage)));

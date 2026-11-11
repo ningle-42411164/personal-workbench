@@ -1,6 +1,9 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useRegisterSW } from 'virtual:pwa-register/vue';
+import QuickTagPicker from './components/QuickTagPicker.vue';
+import TagRuleSettings from './components/TagRuleSettings.vue';
+import { readTagRules, writeTagRules, matchedTags } from './data/tagRules.js';
 import GlobalSearch from './components/GlobalSearch.vue';
 import CategoryChevron from './components/CategoryChevron.vue';
 import ProjectCard from './components/ProjectCard.vue';
@@ -77,6 +80,20 @@ const showMoreOptions = ref(false);
 const quickType = ref('default');
 // 标签随整份草稿保留；收起和切换类型不清空，保存成功才清空。
 const quickTags = ref([]);
+const tagPickerOpen = ref(false), tagRulesOpen = ref(false), removedQuickTags = ref([]);
+const tagRules = ref([]), tagRulesError = ref('');
+try { tagRules.value = readTagRules(); } catch { tagRulesError.value = '本机标签规则读取失败，原设置未覆盖。'; }
+const selectedQuickTags = computed(() => normalizeUserTags([...quickTags.value,
+  ...matchedTags(title.value, tagRules.value, availableProjectTags.value, removedQuickTags.value)]));
+function selectQuickTag(tag) {
+  quickTags.value = normalizeUserTags([...quickTags.value, tag]);
+  removedQuickTags.value = removedQuickTags.value.filter(value => value !== tag);
+}
+function removeQuickTag(tag) {
+  quickTags.value = quickTags.value.filter(value => value !== tag);
+  removedQuickTags.value = [...new Set([...removedQuickTags.value, tag])];
+}
+function saveTagRules(rules) { writeTagRules(rules); tagRules.value = rules; tagRulesError.value = ''; }
 const quickTargetDate = ref('');
 const quickTypes = [
   { type: 'todo', label: '一次性待办' }, { type: 'importantDate', label: '重要日' },
@@ -138,6 +155,13 @@ const projectPreview = ref(true);
 const showOpenTodos = ref(true);
 const today = ref(new Date());
 const pendingImport = ref(null);
+const importOpen = ref(false), readingImport = ref(false);
+let importReadSequence = 0;
+function openImport() {
+  importReadSequence++;
+  pendingImport.value = null; pendingFileName.value = ''; importError.value = '';
+  readingImport.value = false; importOpen.value = true;
+}
 const pendingFileName = ref('');
 const backupInput = ref(null), importError = ref(''), importing = ref(false), cloudSettingsOpen = ref(false);
 const importBound = computed(() => Object.keys(syncSnapshot.value?.bindings ?? {}).length > 0);
@@ -147,7 +171,7 @@ async function locateSearch(id) {
   searchMessage.value = '';
   const item = personalItems.value.find(value => value.id === id);
   if (!item) { searchMessage.value = '该事项已不存在，请重新搜索。'; return; }
-  if (selectedProjectId.value || addingCategory.value === 'project' || pendingImport.value) {
+  if (selectedProjectId.value || addingCategory.value === 'project' || importOpen.value || tagRulesOpen.value) {
     searchMessage.value = '请先保存或取消当前弹窗中的编辑，再定位。'; return;
   }
   const protectedItem = editingOrdinary.value[id];
@@ -168,7 +192,7 @@ async function locateSearch(id) {
   highlighted.value = id;
   clearTimeout(highlightTimer); highlightTimer = setTimeout(() => { highlighted.value = null; }, 1000);
 }
-function cancelImport() { if (!importing.value) { pendingImport.value = null; importError.value = ''; } }
+function cancelImport() { if (!importing.value) { importReadSequence++; importOpen.value = false; readingImport.value = false; pendingImport.value = null; pendingFileName.value = ''; importError.value = ''; } }
 // 插件把 SW 的安装/更新事件转换成 Vue 状态；这不是 LocalStorage 保存成功的通知。
 const { offlineReady, needRefresh, updateServiceWorker } = useRegisterSW();
 
@@ -372,12 +396,12 @@ async function addTask() {
     : quickType.value === 'importantDate'
       ? createImportantDate(title.value.trim(), quickTargetDate.value, now, needProcessing.value)
       : createSimpleItem(quickType.value, title.value.trim(), now, needProcessing.value);
-  item.tags = normalizeUserTags(quickTags.value);
+  item.tags = normalizeUserTags(selectedQuickTags.value);
   // 先生成新数组交给保存入口，只有返回 true 才清空草稿，失败时输入和标签保留。
   if (await saveTasks([...workbenchData.value.items, item])) {
     if (creationText[item.type]) notify(creationText[item.type]);
     title.value = '';
-    quickTags.value = [];
+    quickTags.value = []; removedQuickTags.value = []; tagPickerOpen.value = false;
     needProcessing.value = false;
     urgent.value = false;
     quickType.value = 'default';
@@ -556,29 +580,32 @@ function exportTasks() {
 async function chooseBackup(event) {
   const file = event.target.files?.[0];
   event.target.value = '';
-  pendingImport.value = null;
+  const readSequence = ++importReadSequence;
+  pendingImport.value = null; pendingFileName.value = '';
   importError.value = '';
   if (!file) return;
   if (!storageReadable.value) return;
   try {
     // File.text 异步读取本地文件；JSON.parse 只还原数据，随后校验，尚未写入浏览器。
+    readingImport.value = true;
     const data = JSON.parse(await file.text());
+    if (readSequence !== importReadSequence || !importOpen.value) return;
     pendingImport.value = validateWorkbenchData(data);
     pendingFileName.value = file.name;
     message.value = '';
   } catch (error) {
-    importError.value = error instanceof SyntaxError ? '文件不是有效的 JSON 备份。' : error.message;
-  }
+    if (readSequence === importReadSequence && importOpen.value) importError.value = error instanceof SyntaxError ? '文件不是有效的 JSON 备份。' : error.message;
+  } finally { if (readSequence === importReadSequence) readingImport.value = false; }
 }
 
 async function confirmImport() {
-  if (!storageReadable.value || !pendingImport.value || importing.value) return;
+  if (!storageReadable.value || !pendingImport.value || importing.value || readingImport.value) return;
   importing.value = true; importError.value = '';
   try {
     // 用户确认也不等于成功：必须写入成功，才替换响应式数据并显示成功提示。
     const saved = await sync.save(pendingImport.value, localRevision, { importing: true });
     workbenchData.value = saved.data; localRevision = saved.revision;
-    pendingImport.value = null;
+    pendingImport.value = null; importOpen.value = false; importReadSequence++;
     notify('备份导入成功，当前记录已替换。');
   } catch (error) {
     importError.value = error.message || '导入未完成：浏览器保存失败，原记录保留。请检查本地存储是否可用。';
@@ -617,7 +644,10 @@ async function confirmImport() {
         <label for="task-title">快速记录</label>
         <QuickHelp>{{ quickType === 'default' ? '默认存入随笔；勾选“录入待办”后存入一次性待办。' : '勾选“优先处理”会为所选分类的事项添加优先处理标记。' }}</QuickHelp>
       </div>
+      <button type="button" class="text-button quick-tag-entry" :aria-expanded="tagPickerOpen" @click="tagPickerOpen = !tagPickerOpen">标签</button>
+      <QuickTagPicker v-if="tagPickerOpen" :available="availableProjectTags" :selected="selectedQuickTags" @select="selectQuickTag" />
       <input id="task-title" v-model="title" maxlength="150" placeholder="记录一下..." :disabled="!canEditLocal">
+      <div v-if="selectedQuickTags.length" class="quick-tag-selection" aria-label="本次记录标签"><button v-for="tag in selectedQuickTags" :key="tag" type="button" class="secondary" :aria-label="'移除标签 ' + tag" @click="removeQuickTag(tag)">#{{ tag }} ×</button></div>
       <div class="form-actions">
         <div class="quick-options">
           <label><input v-model="needProcessing" type="checkbox"> {{ quickType === 'default' ? '录入待办' : '优先处理' }}</label>
@@ -628,9 +658,7 @@ async function confirmImport() {
           <button :disabled="!canEditLocal">记录</button>
         </div>
       </div>
-      <p v-if="quickTags.length" class="quick-tag-summary">本次将保存标签：{{ quickTags.map(tag => '#' + tag).join('、') }}</p>
       <div v-if="showMoreOptions" class="more-options">
-        <fieldset class="project-tag-picker"><legend>已有标签（可不选或多选）</legend><div class="project-choice-list"><label v-for="tag in availableProjectTags" :key="tag"><input v-model="quickTags" type="checkbox" :value="tag" :disabled="!canEditLocal">#{{ tag }}</label></div></fieldset>
         <div class="quick-type-options" role="group" aria-label="记录类型">
           <button v-for="option in quickTypes" :key="option.type" type="button" :aria-pressed="quickType === option.type" @click="quickType = option.type; onQuickTypeChange()">{{ option.label }}</button>
           <button v-if="quickType !== 'default'" type="button" @click="quickType = 'default'; onQuickTypeChange()">清除选择</button>
@@ -741,10 +769,9 @@ async function confirmImport() {
     <footer class="workbench-footer">
       <div class="footer-row">
         <div class="footer-label">备份<QuickHelp label="备份说明">导出包含当前完整事项。导入会替换本机记录，已有同步绑定时不可整份替换。清除网站数据会删除本机记录和未补传修改。</QuickHelp></div>
-        <div class="footer-actions"><button type="button" :disabled="!canEditLocal" @click="exportTasks">导出备份</button><button type="button" :disabled="!canEditLocal" aria-haspopup="dialog" @click="backupInput.click()">导入备份</button></div>
-        <input ref="backupInput" id="backup-file" hidden type="file" accept=".json,application/json" :disabled="!canEditLocal" @change="chooseBackup">
+        <div class="footer-actions"><button type="button" :disabled="!canEditLocal" @click="exportTasks">导出备份</button><button type="button" :disabled="!canEditLocal" aria-haspopup="dialog" @click="openImport">导入备份</button></div>
       </div>
-      <p v-if="importError && !pendingImport" class="error" role="alert">{{ importError }}</p>
+      <p v-if="importError && !importOpen" class="error" role="alert">{{ importError }}</p>
       <div class="footer-row">
         <div class="footer-label">启动动画<QuickHelp label="启动动画说明">开关在下次进入时生效，每次会话播放一次。</QuickHelp></div>
         <div class="footer-actions"><button type="button" role="switch" aria-label="启动动画" :aria-checked="splashEnabled" @click="toggleSplashPreference">{{ splashEnabled ? '开启' : '关闭' }}</button></div>
@@ -765,14 +792,20 @@ async function confirmImport() {
         <CloudConnection :offline-summary="repeatedOffline" :state="cloudState" @login="cloud.login()" @enable-write="cloud.login({ write: true })" @resume="cloud.resumeConnection()" @logout="cloud.logout" />
         <SyncSettings :suppress-status-message="repeatedOffline" :snapshot="syncSnapshot" :status="syncStatus" :connection="cloudState" :owner-phone="sync.ownerPhone" @enabled="sync.enabled" @resolve="sync.resolve" />
       </div>
+      <div class="footer-row"><span class="footer-label">标签自动匹配</span><div class="footer-actions"><button type="button" aria-haspopup="dialog" @click="tagRulesOpen = true">设置</button></div></div>
+      <p v-if="tagRulesError" class="error" role="alert">{{ tagRulesError }}</p>
       <GlobalSearch :items="personalItems" :message="searchMessage" @locate="locateSearch" />
     </footer>
-    <ProjectCard v-if="pendingImport" title="导入备份确认" :request-close="cancelImport">
-      <p>文件：{{ pendingFileName }}</p><p>备份 {{ pendingImport.items.length }} 条，现有 {{ workbenchData.items.length }} 条。</p>
+    <TagRuleSettings v-if="tagRulesOpen" :rules="tagRules" :available="availableProjectTags" :save-rules="saveTagRules" @close="tagRulesOpen = false" />
+    <ProjectCard v-if="importOpen" title="导入备份确认" :request-close="cancelImport">
+      <p>导入会用备份内容覆盖本机全部记录，请先保留当前备份。</p>
+      <label for="backup-file">选择 JSON 备份</label><input ref="backupInput" id="backup-file" type="file" accept=".json,application/json" :disabled="importing" @change="chooseBackup">
+      <p v-if="readingImport" role="status">正在校验备份…</p>
+      <template v-if="pendingImport"><p>文件：{{ pendingFileName }}</p><p>备份 {{ pendingImport.items.length }} 条，现有 {{ workbenchData.items.length }} 条。</p></template>
       <p v-if="importBound">已有同步绑定。整份替换可能影响已同步记录，因此不能确认替换；原记录和待同步修改保持不变。</p>
       <p v-else>确认后将用备份替换本机全部记录，请先保留当前备份。</p>
       <p v-if="importError" class="error" role="alert">{{ importError }}</p>
-      <div class="form-buttons"><button type="button" class="secondary" :disabled="importing" @click="cancelImport">取消</button><button type="button" :disabled="importBound || !canEditLocal || importing" @click="confirmImport">确认替换</button></div>
+      <div class="form-buttons"><button type="button" class="secondary" :disabled="importing" @click="cancelImport">取消</button><button type="button" :disabled="importBound || !canEditLocal || importing || readingImport || !pendingImport" @click="confirmImport">确认替换</button></div>
     </ProjectCard>
     <ProjectDialog v-if="selectedProject" ref="projectDialog" :key="selectedProject.id" :project="selectedProject" :can-edit="canEditLocal" :available-tags="availableProjectTags" :save-project="saveProject" :delete-project="deleteItem" @close="selectedProjectId = null" />
   </main>

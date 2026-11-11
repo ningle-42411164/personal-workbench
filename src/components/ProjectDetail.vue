@@ -72,6 +72,11 @@ function displayValue(key) {
   if (key === 'tags') return value.length ? value.map(tag => `#${tag.replace(/^#+/, '')}`).join(' ') : '未填写';
   return value || '未填写';
 }
+function historyLabel(record) {
+  if (record.kind === 'archive') return '留档前版本 · ' + (record.field === 'nextStep' ? '下一步' : '当前情况');
+  if (record.kind === 'change') return record.field === 'nextStep' ? '调整下一步' : '更新当前情况';
+  return '';
+}
 function formatTime(value) {
   const date = new Date(value);
   const clock = [date.getHours(), date.getMinutes(), date.getSeconds()].map(part => String(part).padStart(2, '0')).join(':');
@@ -104,7 +109,14 @@ function formatTime(value) {
       <div class="project-history">
         <h3>更新记录 <small>{{ history.length }}</small></h3>
         <p v-if="!history.length" class="empty">还没有更新记录。</p>
-        <ol v-else><li v-for="record in visibleHistory" :key="record.id">{{ record.content || '当前情况已清空' }}<time :datetime="record.createdAt">（{{ formatTime(record.createdAt) }}）</time></li></ol>
+        <ol v-else class="project-timeline" aria-label="最新记录在前">
+          <li v-for="record in visibleHistory" :key="record.id">
+            <span class="history-node" aria-hidden="true">{{ record.kind === 'archive' ? '◷' : record.field === 'nextStep' ? '→' : '·' }}</span>
+            <div><div class="history-heading"><strong v-if="historyLabel(record)">{{ historyLabel(record) }}</strong><time :datetime="record.createdAt">{{ record.kind === 'archive' ? '留档于 ' : '' }}{{ formatTime(record.createdAt) }}</time></div>
+              <p>{{ record.content || (record.kind ? '已清空' : '当前情况已清空') }}</p>
+            </div>
+          </li>
+        </ol>
         <button v-if="history.length > 1" type="button" class="text-button" :aria-expanded="showAllUpdates" @click="showAllUpdates = !showAllUpdates">{{ showAllUpdates ? '收起' : '查看更多' }}</button>
       </div>
       <p v-if="error && !editingField" class="error" role="alert">{{ error }}</p>

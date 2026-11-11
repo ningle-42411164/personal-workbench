@@ -12,7 +12,7 @@ const itemOutput = z.object({
   urgent: z.boolean().optional(), done: z.boolean().optional(), completedAt: z.string().nullable().optional(),
   status: z.string().nullable().optional(), startDate: z.string().nullable().optional(), dueDate: z.string().nullable().optional(),
   targetDate: z.string().optional(), currentSituation: z.string().optional(), nextStep: z.string().optional(),
-  updates: z.array(z.object({ id: z.string(), content: z.string(), createdAt: z.string() })).optional(),
+  updates: z.array(z.object({ id: z.string(), content: z.string(), createdAt: z.string(), field: z.enum(['currentSituation', 'nextStep']).optional(), kind: z.enum(['change', 'archive']).optional() })).optional(),
   convertedToId: z.string().optional(), convertedToType: z.string().optional(), convertedAt: z.string().optional(),
 }).passthrough();
 const recordOutput = z.object({ item: itemOutput, version: z.number().int().positive() });

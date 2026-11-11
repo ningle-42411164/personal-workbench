@@ -36,7 +36,7 @@ export const syncSchema = z.object({ moveFrom: z.literal('note').optional(), req
   z.object({ ...snapshotBase, type: z.literal('routine') }).strict(),
   z.object({ ...sortableSnapshot, type: z.literal('importantDate'), targetDate: date }).strict(),
   z.object({ ...sortableSnapshot, type: z.literal('todo'), urgent: z.boolean(), done: z.boolean(), completedAt: timestamp.nullable() }).strict(),
-  z.object({ ...sortableSnapshot, type: z.literal('project'), status: z.enum(['active', 'paused', 'done']).nullable().optional(), startDate: date.nullable().optional(), dueDate: date.nullable().optional(), currentSituation: z.string().max(10000).optional(), nextStep: z.string().max(10000).optional(), completedAt: timestamp.nullable().optional(), updates: z.array(z.object({ id: z.string().min(1), content: z.string().max(10000), createdAt: timestamp }).strict()).optional() }).strict(),
+  z.object({ ...sortableSnapshot, type: z.literal('project'), status: z.enum(['active', 'paused', 'done']).nullable().optional(), startDate: date.nullable().optional(), dueDate: date.nullable().optional(), currentSituation: z.string().max(10000).optional(), nextStep: z.string().max(10000).optional(), completedAt: timestamp.nullable().optional(), updates: z.array(z.object({ id: z.string().min(1), content: z.string().max(10000), createdAt: timestamp, field: z.enum(['currentSituation', 'nextStep']).optional(), kind: z.enum(['change', 'archive']).optional() }).strict()).optional() }).strict(),
 ]) }).strict();
 export const syncBatchSchema = z.object({ requestId, entries: z.array(z.object({ moveFrom: z.literal('note').optional(), id: z.string().uuid(), expectedVersion: z.number().int().min(0), item: syncSchema.shape.item.nullable() }).strict()).min(2).max(32) }).strict();
 

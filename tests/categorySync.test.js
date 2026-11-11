@@ -345,7 +345,7 @@ test('排序与置顶走现有队列；回执丢失原请求重试，另一设�
   const p=await s.service.create({requestId:'isolated-order-project',type:'project',title:'顺序夹具'});
   await s.engine.run();await save(s,all=>all.map(x=>x.id===p.item.id?{...x,pinned:true,rank:-40}:x));await s.engine.run();
   const before=await s.service.getProject({id:p.item.id});const next=await s.service.updateProject({id:p.item.id,requestId:'isolated-order-edit',expectedVersion:before.version,fields:{nextStep:'继续'}});
-  assert.equal(next.item.pinned,true);assert.ok(compareRows(next.item,before.item)<0);assert.deepEqual(next.item.updates,before.item.updates);
+  assert.equal(next.item.pinned,true);assert.ok(compareRows(next.item,before.item)<0);assert.deepEqual(next.item.updates.slice(0,-1),before.item.updates);assert.equal(next.item.updates.at(-1).field,'nextStep');
 });
 
 test('七类置顶通过存储与另一设备拉取；旧紧急、单撤紧急与取消置顶分开处理', async t => {

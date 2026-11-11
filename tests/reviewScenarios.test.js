@@ -31,7 +31,7 @@ test('审查：完整生命周期保留分类、标签、完成时间和项目�
   const backup = JSON.parse(JSON.stringify(readWorkbenchData(storage)));
   writeWorkbenchData(validateWorkbenchData(backup), storage);
   assert.deepEqual(readWorkbenchData(storage).items, finished);
-  assert.equal(backup.items.find(item => item.type === 'project').updates.length, 3);
+  assert.equal(backup.items.find(item => item.type === 'project').updates.length, 4);
   assert.deepEqual(backup.items.filter(item => item.done).map(item => item.completedAt), Array(5).fill('2026-09-26T08:04:00.000Z'));
 });
 

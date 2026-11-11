@@ -15,13 +15,14 @@ function setup() {
   return { state, editor, controls, get project() { return project; }, get writes() { return writes; }, get confirms() { return confirms; } };
 }
 
-test('同字段重入不重置；切换字段先保存实际改动，仅当前情况追加一次历史', async () => {
+test('同字段重入不重置；切换字段先保存实际改动，两个字段分别追加历史与必要留档', async () => {
   const s = setup(); await s.editor.begin('currentSituation'); s.state.draft = '未保存推进';
   await s.editor.begin('currentSituation'); assert.equal(s.state.draft, '未保存推进'); assert.equal(s.writes, 0);
   assert.equal(await s.editor.begin('nextStep'), true);
-  assert.equal(s.project.currentSituation, '未保存推进'); assert.equal(s.project.updates.length, 2);
+  assert.equal(s.project.currentSituation, '未保存推进'); assert.equal(s.project.updates.length, 3);
   s.state.draft = '新的下一步'; await s.editor.commit();
-  assert.equal(s.project.nextStep, '新的下一步'); assert.equal(s.project.updates.length, 2);
+  assert.equal(s.project.nextStep, '新的下一步'); assert.equal(s.project.updates.length, 5);
+  assert.deepEqual(s.project.updates.slice(1).map(x => [x.field, x.kind]), [['currentSituation','archive'],['currentSituation','change'],['nextStep','archive'],['nextStep','change']]);
 });
 
 test('编辑期间同一字段被云端更新时保留输入并阻止自动覆盖，其他字段变化仍可合并', async () => {
@@ -43,7 +44,7 @@ test('保存失败阻止切字段、关闭和完成，保留输入及编辑状�
   assert.equal(s.confirms, 0); assert.equal(s.project.currentSituation, '原情况');
   assert.equal(s.state.field, 'currentSituation'); assert.equal(s.state.draft, '失败也应保留'); assert.match(s.state.error, /保存失败/);
   s.controls.fail = false; assert.equal(await s.editor.commit(), true);
-  assert.equal(s.project.currentSituation, '失败也应保留'); assert.equal(s.project.updates.length, 2);
+  assert.equal(s.project.currentSituation, '失败也应保留'); assert.equal(s.project.updates.length, 3);
   assert.equal(s.state.field, null);
 });
 
@@ -62,8 +63,8 @@ test('完成先提交当前情况，再基于最新项目写完成状态；不�
   const s = setup(); await s.editor.begin('currentSituation'); s.state.draft = '完成之前的推进';
   assert.equal(await s.editor.complete(), true);
   assert.equal(s.project.currentSituation, '完成之前的推进'); assert.equal(s.project.status, 'done');
-  assert.ok(s.project.completedAt); assert.equal(s.project.updates.length, 2); assert.equal(s.confirms, 1);
-  assert.equal(await s.editor.complete(), true); assert.equal(s.writes, 2); assert.equal(s.project.updates.length, 2);
+  assert.ok(s.project.completedAt); assert.equal(s.project.updates.length, 3); assert.equal(s.confirms, 1);
+  assert.equal(await s.editor.complete(), true); assert.equal(s.writes, 2); assert.equal(s.project.updates.length, 3);
 });
 
 test('主动取消只放弃当前未提交字段；此前自动保存的字段仍保留', async () => {
@@ -76,7 +77,7 @@ test('主动取消只放弃当前未提交字段；此前自动保存的字段�
 test('并发离开不重复保存；完成确认取消时仍保留状态草稿', async () => {
   const s = setup(); await s.editor.begin('currentSituation'); s.state.draft = '并发关闭';
   const results = await Promise.all([s.editor.commit(), s.editor.commit()]);
-  assert.deepEqual(results, [true, false]); assert.equal(s.writes, 1); assert.equal(s.project.updates.length, 2);
+  assert.deepEqual(results, [true, false]); assert.equal(s.writes, 1); assert.equal(s.project.updates.length, 3);
   await s.editor.begin('status'); s.state.draft = 'done'; s.controls.confirm = false;
   assert.equal(await s.editor.commit(), false); assert.equal(s.project.status, 'active'); assert.equal(s.state.field, 'status'); assert.equal(s.state.draft, 'done');
 });

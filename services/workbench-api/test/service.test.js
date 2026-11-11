@@ -18,7 +18,7 @@ test('创建、读取、项目更新复用现有字段和历史语义', async t 
   const updated = await service.updateProject({ requestId: 'update-project-1', id: created.item.id, expectedVersion: 1,
     fields: { currentSituation: '已接通读取', nextStep: '验证写入' } });
   assert.equal(updated.version, 2);
-  assert.equal(updated.item.updates.length, 2);
+  assert.equal(updated.item.updates.length, 3);
   assert.equal(updated.item.createdAt, created.item.createdAt);
   assert.equal(updated.item.updates[0].id, created.item.updates[0].id);
   assert.deepEqual(await service.getProject({ id: created.item.id }), updated);

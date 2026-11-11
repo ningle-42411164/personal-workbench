@@ -327,3 +327,19 @@ button,input,select,textarea { font-family:inherit; }
 button { color:var(--primary-ink); }
 .secondary, .footer-actions > button { color:var(--button-ink); }
 input:not([type=checkbox]), select, .project-edit textarea { background:var(--input); }
+
+.project-history .project-timeline { list-style:none; margin:0; padding:0; }
+.project-timeline li { position:relative; display:grid; grid-template-columns:21px minmax(0,1fr); gap:8px; padding:0 0 12px; }
+.project-timeline li:not(:last-child)::before { content:''; position:absolute; left:10px; top:11px; bottom:-11px; width:1px; background:var(--line); }
+.history-node { position:relative; display:grid; place-items:center; width:21px; height:21px; font-size:12px; border-radius:50%; background:var(--secondary); color:var(--primary); }
+.history-heading { display:flex; flex-wrap:wrap; gap:2px 8px; align-items:baseline; }
+.project-timeline p { margin:4px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; }
+
+.quick-tag-entry { float:right; min-height:44px; margin-top:-12px; }
+.quick-tag-picker { clear:both; padding-top:8px; }
+.tag-results,.quick-tag-selection { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
+.tag-results button,.quick-tag-selection button { min-height:44px; padding:6px 9px; overflow-wrap:anywhere; }
+.tag-rule-list { padding:0; list-style:none; }
+.tag-rule-list li { display:flex; align-items:center; gap:8px; justify-content:space-between; border-bottom:1px solid var(--line); }
+.tag-rule-list span { min-width:0; overflow-wrap:anywhere; }
+.tag-rule-list button { min-height:44px; flex:none; }

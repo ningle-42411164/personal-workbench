@@ -94,7 +94,10 @@ export function validateWorkbenchData(data) {
           (item.updates !== undefined && (!Array.isArray(item.updates) || item.updates.some(update =>
             !update || typeof update !== 'object' || Array.isArray(update) ||
             typeof update.id !== 'string' || !update.id.trim() ||
-            typeof update.content !== 'string' || !isTimestamp(update.createdAt)) ||
+            typeof update.content !== 'string' || !isTimestamp(update.createdAt) ||
+            (update.field !== undefined && !['currentSituation', 'nextStep'].includes(update.field)) ||
+            (update.kind !== undefined && !['change', 'archive'].includes(update.kind)) ||
+            ((update.field === undefined) !== (update.kind === undefined))) ||
             new Set(item.updates.map(update => update.id)).size !== item.updates.length))) {
         throw new Error(`${position}的项目详情或更新记录格式不正确。`);
       }
@@ -235,9 +238,17 @@ export function updateProject(project, fields, now = new Date().toISOString()) {
   const result = { ...project, updatedAt: now };
   changedKeys.forEach(key => { result[key] = next[key]; });
   if (changedKeys.includes('status')) result.completedAt = next.status === 'done' ? now : null;
-  if (changedKeys.includes('currentSituation')) {
-    result.updates = [...(project.updates ?? []), { id: crypto.randomUUID(), content: next.currentSituation, createdAt: now }];
+  const history = [...(project.updates ?? [])];
+  for (const field of ['currentSituation', 'nextStep']) {
+    if (!changedKeys.includes(field)) continue;
+    // 旧记录没有字段身份，不猜测其类型；覆盖前用明确的留档记录保留旧值。
+    const latest = [...history].reverse().find(record => record.field === field);
+    if (before[field] && latest?.content !== before[field]) {
+      history.push({ id: crypto.randomUUID(), field, kind: 'archive', content: before[field], createdAt: now });
+    }
+    history.push({ id: crypto.randomUUID(), field, kind: 'change', content: next[field], createdAt: now });
   }
+  if (history.length !== (project.updates ?? []).length) result.updates = history;
   validateWorkbenchData({ schemaVersion: SCHEMA_VERSION, items: [result] });
   return result;
 }

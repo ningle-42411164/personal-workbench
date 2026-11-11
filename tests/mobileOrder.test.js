@@ -8,7 +8,7 @@ test('项目状态和置顶分组独立，拖动跨组失败且不会生成历�
  assert.deepEqual(items.sort(compareRows).map(subgroup),[0,1,2,3]);
  assert.equal(moveRank(items,0,3),null);
  const old=items[0], next=patchProject(old,{nextStep:'新步骤'});
- assert.equal(next.pinned,true);assert.ok(Number.isFinite(next.rank));assert.deepEqual(next.updates,old.updates);
+ assert.equal(next.pinned,true);assert.ok(Number.isFinite(next.rank));assert.deepEqual(next.updates.slice(0,-1),old.updates);assert.equal(next.updates.at(-1).field,'nextStep');
  assert.equal(patchProject(next,{nextStep:'新步骤'}),next);
 });
 test('同一毫秒的相邻旧事项中间插入只改被拖动项',()=>{
