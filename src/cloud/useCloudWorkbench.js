@@ -16,9 +16,11 @@ export const cloudWorkbench = createCloudController({
   announceLogout: () => channel?.postMessage('logout'),
 });
 export const fallbackNotice = shallowRef(0);
+export const localFallback = shallowRef(false);
 export const connectionRecovery = createConnectionRecovery({
   auth, visible: () => document.visibilityState !== 'hidden',
-  onFallback: () => { fallbackNotice.value++; },
+  onFallback: () => { localFallback.value = true; fallbackNotice.value++; },
+  onRecovered: () => { localFallback.value = false; },
 });
 let draftStorage;
 try { draftStorage = globalThis.sessionStorage; } catch { /* 禁用存储时保留内存草稿。 */ }

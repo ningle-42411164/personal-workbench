@@ -1,18 +1,11 @@
 <script setup>
 import {computed,ref,useId,onMounted,onBeforeUnmount} from 'vue';
-const props=defineProps({snapshot:Object,status:Object,auth:Object});
+import { syncDisplayMode } from '../sync/syncDisplay.js';
+const props=defineProps({snapshot:Object,status:Object,auth:Object,localFallback:Boolean});
 const count=computed(()=>Object.keys(props.snapshot?.dirty??{}).length);
 const conflicts=computed(()=>Object.keys(props.snapshot?.blocked??{}).length);
-const mode=computed(()=>{
-  if(!props.snapshot?.enabled)return 'local';
-  if(props.status.phase==='offline')return 'offline';
-  if(conflicts.value)return 'conflict';
-  if(['failed','login','permission'].includes(props.status.phase))return 'failed';
-  if(props.status.phase==='syncing')return 'syncing';
-  if(count.value || props.status.phase!=='ready' || !props.auth?.canWrite || !props.status.lastSuccess)return 'pending';
-  return 'ready';
-});
-const labels={local:'本机保存',pending:'待同步',syncing:'同步中',ready:'已同步',offline:'离线',failed:'同步未完成',conflict:'存在冲突'};
+const mode=computed(()=>syncDisplayMode(props.snapshot,props.status,props.auth,props.localFallback));
+const labels={local:'本机保存',fallback:'本地模式',pending:'待同步',syncing:'同步中',ready:'已同步',offline:'离线',failed:'同步未完成',conflict:'存在冲突'};
 // 展开说明只影响浮层；数据来源仍是上面的同步状态和队列快照。
 const control = ref(null);
 const expanded = ref(false);
@@ -38,12 +31,12 @@ const summaryId = useId();
     <button type="button" class="sync-symbol" :class="mode" :aria-label="labels[mode]"
       :aria-expanded="expanded" :aria-controls="summaryId" @click="expanded = !expanded">
       <svg class="sync-main" viewBox="0 0 24 24" aria-hidden="true">
-        <path v-if="mode === 'local'" d="m2.5 14 3-8a2 2 0 0 1 2-1.4h9a2 2 0 0 1 2 1.4l3 8M4 13h16a1.5 1.5 0 0 1 1.5 1.5V18a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-3.5A1.5 1.5 0 0 1 4 13Zm2 3.5h1m3 0h.2"/>
+        <path v-if="mode === 'local' || mode === 'fallback'" d="m2.5 14 3-8a2 2 0 0 1 2-1.4h9a2 2 0 0 1 2 1.4l3 8M4 13h16a1.5 1.5 0 0 1 1.5 1.5V18a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-3.5A1.5 1.5 0 0 1 4 13Zm2 3.5h1m3 0h.2"/>
         <path v-else d="M7 18.5a5.8 5.8 0 1 1 1.8-11.3 7 7 0 0 1 12 4.2A3.7 3.7 0 0 1 19 18.5Z"/>
       </svg>
       <span v-if="mode !== 'local'" class="sync-badge" aria-hidden="true">
         <svg viewBox="0 0 16 16">
-          <g v-if="mode === 'pending'"><circle cx="8" cy="8" r="6"/><path d="M8 4v4h3"/></g>
+          <g v-if="mode === 'pending' || mode === 'fallback'"><circle cx="8" cy="8" r="6"/><path d="M8 4v4h3"/></g>
           <path v-else-if="mode === 'syncing'" d="M2.5 7a5.5 5.5 0 0 1 9.8-2.6L14 6m0-4v4h-4M13.5 9a5.5 5.5 0 0 1-9.8 2.6L2 10m0 4v-4h4"/>
           <path v-else-if="mode === 'ready'" d="m2.5 8 3.6 3.6 7.4-7.4"/>
           <path v-else-if="mode === 'offline'" d="m2 2 12 12M5 5a4 4 0 0 0 0 8h5M7.8 3.5a4.4 4.4 0 0 1 5.5 4.2 2.6 2.6 0 0 1 1 4.1"/>
@@ -53,7 +46,7 @@ const summaryId = useId();
       </span>
     </button>
     <div v-show="expanded" :id="summaryId" class="sync-summary">
-      {{ labels[mode] }}<template v-if="mode !== 'local'"> · 待同步 {{ count }} 项 · 待核对 {{ conflicts }} 项<br>{{ status.message }}</template>
+      {{ labels[mode] }}<template v-if="mode !== 'local'"> · 待同步 {{ count }} 项 · 待核对 {{ conflicts }} 项<br>{{ mode === 'fallback' ? '已转为本地模式；待同步修改保留，后台继续尝试连接。' : status.message }}</template>
     </div>
   </div>
 </template>
@@ -67,7 +60,7 @@ header > .sync-control { position:absolute; top:-13px; right:0; }
 .sync-badge { position:absolute; right:0; bottom:0; display:grid; place-items:center; width:17px; height:17px; border-radius:50%; background:var(--panel-1); box-shadow:0 0 0 2px var(--page); }
 .sync-badge svg { width:12px; height:12px; }
 .failed { color:var(--danger-2); }
-.pending,.conflict { color:var(--warning-2); }
+.pending,.conflict,.fallback { color:var(--warning-2); }
 .ready { color:var(--positive); }
 .sync-summary { position:absolute; z-index:5; right:0; top:calc(100% + 6px); width:max-content; max-width:min(18rem,calc(100vw - 40px)); overflow-wrap:anywhere; padding:10px 12px; background:var(--panel-1); border:1px solid var(--line-4); border-radius:10px; color:var(--ink); font-size:.875rem; }
 </style>

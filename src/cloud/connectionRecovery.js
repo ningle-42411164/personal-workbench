@@ -1,5 +1,5 @@
 // 一个调度器协调授权恢复与同步；3 秒只提示，不取消仍在执行的请求。
-export function createConnectionRecovery({ auth, onFallback = () => {}, schedule = setTimeout, cancel = clearTimeout, visible = () => true } = {}) {
+export function createConnectionRecovery({ auth, onFallback = () => {}, onRecovered = () => {}, schedule = setTimeout, cancel = clearTimeout, visible = () => true } = {}) {
   let running, timer, noticeTimer, stopped = false, failures = 0, notified = false, pendingWake = false;
   let synchronize = async () => ({ phase: 'paused' });
   function fallback() {
@@ -31,7 +31,11 @@ export function createConnectionRecovery({ auth, onFallback = () => {}, schedule
         if (['login', 'permission'].includes(result?.phase)) { fallback(); return; }
         connected = true;
         failures = 0;
-        notified = false;
+        // 授权成功、部分补传或暂停都不能解除本地回退显示。
+        if (result?.phase === 'ready') {
+          notified = false;
+          onRecovered();
+        }
       } catch (error) {
         if (error?.name === 'AbortError' || stopped) return;
         fallback();

@@ -25,7 +25,7 @@ import SyncSettings from './components/SyncSettings.vue';
 import { useSyncWorkbench } from './sync/useSyncWorkbench.js';
 import { equal } from './sync/syncStore.js';
 import { isKnownTestRecord } from './sync/knownTestRecords.js';
-import { useCloudWorkbench, fallbackNotice } from './cloud/useCloudWorkbench.js';
+import { useCloudWorkbench, fallbackNotice, localFallback } from './cloud/useCloudWorkbench.js';
 import { normalizeUserTags, availableUserTags } from './data/userTags.js';
 import { readSplashEnabled, writeSplashEnabled } from './data/splashPreference.js';
 import { COMPLETABLE_TYPES, moveNote, createImportantDate, createNote, createRoutine, createSimpleItem, createTodo, emptyWorkbenchData, isCalendarDate, readWorkbenchData, removeItem, renameItem, toggleTodo, validateWorkbenchData } from './data/workbenchData.js';
@@ -618,7 +618,7 @@ async function confirmImport() {
   <LaunchSplash v-if="showSplash" />
   <main>
     <SuccessMessages ref="successMessages" @locate="locateCompleted" />
-    <header><SyncSymbol :snapshot="syncSnapshot" :status="syncStatus" :auth="cloudState.auth" /><span class="eyebrow">Personal Workbench</span><h1>欢迎回来，从哪里开始干活？</h1></header>
+    <header><SyncSymbol :snapshot="syncSnapshot" :status="syncStatus" :auth="cloudState.auth" :local-fallback="localFallback" /><span class="eyebrow">Personal Workbench</span><h1>欢迎回来，从哪里开始干活？</h1></header>
     <div v-if="needRefresh" class="notice">有新版本可用。<button @click="updateServiceWorker()">更新应用</button></div>
     <!-- 原首页继续使用同一个 v2 集合；所有者连接后八类事项由事务队列同步，未连接访客只保存本机。 -->
     <section class="routine-strip" aria-label="日常持续">

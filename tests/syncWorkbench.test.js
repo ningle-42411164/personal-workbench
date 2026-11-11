@@ -10,6 +10,7 @@ import { D1Store } from '../services/workbench-api/src/store.js';
 import { sqliteD1 } from '../services/workbench-api/test/sqlite-d1.js';
 import { handleApi } from '../services/workbench-api/src/http.js';
 import { createConnectionRecovery } from '../src/cloud/connectionRecovery.js';
+import { syncDisplayMode } from '../src/sync/syncDisplay.js';
 
 const at = '2026-10-26T08:00:00.000Z';
 const data = items => ({ schemaVersion: 2, items });
@@ -17,7 +18,7 @@ const data = items => ({ schemaVersion: 2, items });
 test('授权已恢复但同步回执迟到：三秒提示一次，队列保留到有效回执后才显示已同步', async t => {
   const s = setup(t); await s.store.read(); await s.store.setEnabled(true);
   const todo = createTodo('隔离慢同步请求', false, at); await add(s.store, todo);
-  const jobs = new Map(); let sequence = 0, notices = 0, release, entered;
+  const jobs = new Map(); let sequence = 0, notices = 0, release, entered, localFallback = false;
   const waiting = new Promise(resolve => { release = resolve; });
   const sending = new Promise(resolve => { entered = resolve; });
   const engine = createSyncEngine({ store:s.store, managed:true,
@@ -26,7 +27,7 @@ test('授权已恢复但同步回执迟到：三秒提示一次，队列保留�
   });
   const recovery = createConnectionRecovery({
     auth:{getStatus:()=>({state:'connected',remembered:true}),restore:async()=>{}},
-    onFallback:()=>notices++,
+    onFallback:()=>{notices++;localFallback=true;},onRecovered:()=>{localFallback=false;},
     schedule(fn,ms){jobs.set(++sequence,{fn,ms});return sequence;},cancel(id){jobs.delete(id);},
   });
   t.after(()=>{release();recovery.stop();engine.stop();});
@@ -39,6 +40,7 @@ test('授权已恢复但同步回执迟到：三秒提示一次，队列保留�
   let state = await s.store.read();
   assert.deepEqual(state.dirty,original.dirty); assert.equal(Object.keys(state.dirty).length,1);
   assert.deepEqual(state.outbox,original.outbox);
+  assert.equal(syncDisplayMode(state,s.controls.statuses.at(-1),{canWrite:true},localFallback),'fallback');
   assert.equal(s.controls.statuses.at(-1).phase,'syncing');
   assert.equal(s.controls.statuses.some(status=>status.phase==='ready'),false);
   s.controls.online=false; release(); await running;
@@ -50,6 +52,7 @@ test('授权已恢复但同步回执迟到：三秒提示一次，队列保留�
   state = await s.store.read();
   assert.deepEqual(state.dirty,{}); assert.deepEqual(state.outbox,{});
   assert.equal(s.controls.statuses.at(-1).phase,'ready'); assert.equal(notices,1);
+  assert.equal(syncDisplayMode(state,s.controls.statuses.at(-1),{canWrite:true},localFallback),'ready');
   const writes=s.controls.calls.filter(call=>call.method==='PUT');
   assert.equal(writes.length,2); assert.equal(writes[0].body,writes[1].body);
 });
