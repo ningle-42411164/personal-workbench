@@ -12,7 +12,7 @@ const ordered = value => Array.isArray(value) ? value.map(ordered) : value && ty
 export const equal = (a, b) => JSON.stringify(ordered(a)) === JSON.stringify(ordered(b));
 const currentItem = (state, id) => state.data.items.find(item => item.id === id) ?? null;
 function syncEntry(id, version, base, item) {
-  if (base && item && base.type !== item.type && (base.type === 'waiting' && item.reminder?.enteredAt || base.type === 'todo' && item.type === 'note')) return {id, expectedVersion:version, ...conversionStep(base,item)};
+  if (base && item && base.type !== item.type && base.type === 'waiting' && item.reminder?.enteredAt) return {id, expectedVersion:version, ...conversionStep(base,item)};
   if (canMoveNote(base, item?.type)) {
     return { id, expectedVersion:version, moveFrom:'note', item:initialMoveSnapshot(base, item) };
   }

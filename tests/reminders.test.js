@@ -138,3 +138,12 @@ for(const choice of ['local','cloud'])test('提醒关联组冲突采用'+choice+
  assert.equal((await s.service.getItem({id:item.id})).item.type,choice==='local'?'todo':'waiting');
  if(choice==='cloud')assert.ok(state.data.items.some(x=>x.title.includes('冲突副本')&&activeReminder(x)));
 });
+
+test('已转入提醒退回随笔直接提交保存快照，不重新生成操作时间或 rank',async t=>{
+ const s=setup(t);await s.store.read();await s.store.setEnabled(true);
+ const item=applyDueReminders([setReminderDate(waiting(),'2026-11-20')],day(19))[0];await add(s.store,item);await s.engine.run();
+ let state=await s.store.read();const note={...returnTodo(state.data.items,item.id)[0],updatedAt:'2026-11-20T05:00:00.000Z',rank:-123456};
+ await s.store.save(data([note]),state.revision);const job=await s.store.prepare();assert.deepEqual(job.item,note);
+ const reply=await s.api.send(job);assert.deepEqual(await s.store.prepare(),job);await s.store.acknowledge(job,reply);
+ assert.deepEqual((await s.store.read()).dirty,{});assert.deepEqual((await s.store.read()).data.items,[note]);
+});
