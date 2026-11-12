@@ -51,6 +51,10 @@ export function useSyncWorkbench() {
       if (saved.enabled && pending) status.value = { ...status.value, phase: 'pending', message: `待同步 ${pending} 项，已保存在本机。` };
       engine.wake(); return saved;
     },
+    async checkReminders(now, skipIds) {
+      const saved = await store.checkReminders(now,skipIds);
+      snapshot.value=saved; engine.wake(); return saved;
+    },
     async enabled(value) {
       engine.interrupt();
       try { snapshot.value = await store.setEnabled(value); if (!value) status.value = { ...status.value, phase: 'paused', message: '自动同步已暂停，本机编辑与待同步修改继续保留。' }; engine.wake(); } catch (error) { fail(error); }

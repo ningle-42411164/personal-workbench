@@ -354,3 +354,21 @@ input:not([type=checkbox]), select, .project-edit textarea { background:var(--in
   .project-field-row.has-favorite > .favorite-slot { grid-column:2; grid-row:1; }
   .project-dialog .has-favorite .project-field-value, .project-dialog .has-favorite .project-field-editor { grid-column:1; }
 }
+
+/* 日期提醒颜色与定位高亮独立；定位计时器不移除提醒状态。 */
+:root { --reminder-border:#dfc68b; }
+:root[data-theme="dark"] { --reminder-border:#75643b; }
+.reminder-banner {display:flex;align-items:center;gap:8px;padding:10px;border:1px solid var(--reminder-border);border-radius:12px;background:var(--warning-bg);color:var(--warning);margin-bottom:14px;}
+.reminder-banner>svg {width:18px;height:18px;flex:0 0 18px;}
+.reminder-banner>div {flex:1;min-width:0;overflow-wrap:anywhere;}
+.reminder-banner>button {flex-shrink:0;min-height:44px;font-size:13px;padding:8px 10px;}
+.ordinary-item.reminder-active {background:var(--warning-bg);border:1px solid var(--reminder-border);border-left:3px solid var(--warning);border-radius:8px;padding-left:8px;}
+.reminder-editor {min-width:0;margin-top:8px;}
+.reminder-field-head {display:flex;align-items:center;min-height:44px;gap:0;}
+.reminder-field-head .quick-help {flex:0 0 44px;}
+.reminder-field-head .quick-help button {width:44px;height:44px;}
+.reminder-field-head .quick-help button::after {display:none;}
+.reminder-field-head .cancel-reminder {margin-left:auto;min-height:44px;font-size:13px;background:transparent;color:var(--muted);padding:8px 0 8px 8px;}
+.reminder-editor input[type=date] {display:block;box-sizing:border-box;width:100%;min-width:0;max-width:100%;min-height:46px;font-size:16px;padding:10px 12px;border:1px solid var(--input-border);border-radius:8px;}
+.reminder-buttons {display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:8px;margin-top:12px;}
+.reminder-buttons button,.reminder-date-display {min-height:44px;padding:8px 16px;font-size:13px;border-radius:8px;}

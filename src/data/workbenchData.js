@@ -1,3 +1,4 @@
+import { validateReminder, stopReminder } from './reminders.js';
 import { frontRank } from './itemOrder.js';
 
 export const STORAGE_KEY = 'personal-workbench.data.v2';
@@ -62,6 +63,7 @@ export function validateWorkbenchData(data) {
         !isTimestamp(item.createdAt) || !isTimestamp(item.updatedAt)) {
       throw new Error(`${position}格式不正确，请检查类型、标题、标签、时间和完成状态。`);
     }
+    validateReminder(item);
     if (item.type === 'todo' &&
         (typeof item.urgent !== 'boolean' || typeof item.done !== 'boolean' ||
          !(item.completedAt === null || isTimestamp(item.completedAt)) ||
@@ -323,5 +325,5 @@ export function renameItem(item, title, now = new Date().toISOString()) {
 export function toggleTodo(todo, now = new Date().toISOString()) {
   if (!COMPLETABLE_TYPES.includes(todo.type)) throw new Error('此分类不使用勾选完成。');
   const done = !todo.done;
-  return { ...todo, done, updatedAt: now, completedAt: done ? now : null };
+  return { ...stopReminder(todo), done, updatedAt: now, completedAt: done ? now : null };
 }

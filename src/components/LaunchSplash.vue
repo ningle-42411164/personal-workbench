@@ -1,6 +1,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 //这一堆就是管入场动画的
+const emit=defineEmits(['finished']);
 const storageKey = 'personal-workbench.splash.seen.v1';
 const visible = ref(document.documentElement.classList.contains('splash-pending'));//启动页是否需要启动，相当于检查<html class="splash-pending">是否存在
 const closing = ref(false);//是否开始关闭入场动画
@@ -19,6 +20,7 @@ function finishSplash() {
   removeTimer = window.setTimeout(() => {
     visible.value = false;
     document.documentElement.classList.remove('splash-pending');
+    emit('finished');
   }, reduceMotion ? 160 : 260);
 }
 

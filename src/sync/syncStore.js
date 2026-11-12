@@ -1,3 +1,4 @@
+import { applyDueReminders } from '../data/reminders.js';
 import { conversionStep } from './conversionResolution.js';
 import { STORAGE_KEY, emptyWorkbenchData, validateWorkbenchData, removeItem, initialMoveSnapshot, canMoveNote } from '../data/workbenchData.js';
 import { isKnownTestRecord } from './knownTestRecords.js';
@@ -11,10 +12,18 @@ const ordered = value => Array.isArray(value) ? value.map(ordered) : value && ty
 export const equal = (a, b) => JSON.stringify(ordered(a)) === JSON.stringify(ordered(b));
 const currentItem = (state, id) => state.data.items.find(item => item.id === id) ?? null;
 function syncEntry(id, version, base, item) {
+  if (base && item && base.type !== item.type && (base.type === 'waiting' && item.reminder?.enteredAt || base.type === 'todo' && item.type === 'note')) return {id, expectedVersion:version, ...conversionStep(base,item)};
   if (canMoveNote(base, item?.type)) {
     return { id, expectedVersion:version, moveFrom:'note', item:initialMoveSnapshot(base, item) };
   }
   return { id, expectedVersion:version, item:copy(item) };
+}
+function alignReferences(entries) {
+  // 中间转换步骤可能仍是待办，而本机已退回随笔；组内来源必须指向本次实际提交的分类。
+  return entries.map(entry => {
+    const target=entries.find(value=>value.id===entry.item?.convertedToId)?.item;
+    return target && target.type !== 'note' ? {...entry,item:{...entry.item,convertedToType:target.type}} : entry;
+  });
 }
 function putItem(state, item, id) {
   state.data.items = item ? [...state.data.items.filter(value => value.id !== id), item]
@@ -99,7 +108,7 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
     read,
     ownerPhone,
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-    async save(data, revision, { importing = false } = {}) {
+    async save(data, revision, { importing = false, reminderNow, skipReminderIds = [] } = {}) {
       validateWorkbenchData(data);
       return (await transact(state => {
         expected(state, revision);
@@ -107,6 +116,7 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
         const oldIds = new Set(state.data.items.map(item => item.id));
         const previous = state.data;
         state.data = copy(data);
+        if (reminderNow && !importing) state.data.items = applyDueReminders(state.data.items,new Date(reminderNow),skipReminderIds);
         if (ownerPhone && state.enabled && !importing) for (const item of data.items) {
           if (!oldIds.has(item.id) && syncSupported(item) && !isKnownTestRecord(item.id) && !state.heldLocal?.[item.id] && !state.bindings[item.id]) state.bindings[item.id] = { version: 0, base: null };
         }
@@ -118,6 +128,12 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
           }
           dirty(state, id);
         }
+      })).state;
+    },
+    async checkReminders(reminderNow, skipIds = []) {
+      return (await transact(state => {
+        state.data.items=applyDueReminders(state.data.items,new Date(reminderNow),skipIds);
+        for (const id of Object.keys(state.bindings)) dirty(state,id);
       })).state;
     },
     async activateOwnerPhone(canWrite) {
@@ -172,7 +188,7 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
             const entries = ids.filter(key => state.bindings[key].version > 0 || currentItem(state, key)).map(key => syncEntry(key, state.bindings[key].version, state.bindings[key].base, currentItem(state, key)));
             if (entries.length > 32) { state.blocked[id] = { kind: 'rejected', code: 'GROUP_TOO_LARGE', message: '关联组超过一次提交上限，原内容保留。' }; continue; }
             if (entries.length > 1) {
-              const job = { id, requestId: uuid(), entries };
+              const job = { id, requestId: uuid(), entries:alignReferences(entries) };
               for (const entry of entries) { state.outbox[entry.id] = job; state.dirty[entry.id] = true; }
               return job;
             }
@@ -311,12 +327,12 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
         });
         if (!entries.length) throw new Error('双方均已删除，请采用云端确认删除结果。');
         const changingType = records.some(remote => remote.item && currentItem(state, remote.item.id) && remote.item.type !== currentItem(state, remote.item.id).type);
-        if (changingType && records.length > 1) throw new Error('关联组分类转换不能逐条提交，双方保留；可采用云端并保留本机副本。');
-        if (changingType) {
+        if (changingType && records.length > 1 && !records.every(remote => !remote.item || !currentItem(state,remote.item.id) || remote.item.type === currentItem(state,remote.item.id).type || remote.item.type === 'waiting' && currentItem(state,remote.item.id).reminder?.enteredAt || remote.item.type === 'todo' && currentItem(state,remote.item.id).type === 'note')) throw new Error('关联组分类转换不能逐条提交，双方保留；可采用云端并保留本机副本。');
+        if (changingType && records.length === 1) {
           const target = copy(currentItem(state, id));
           Object.assign(entries[0], conversionStep(records[0].item, target), { resolutionTarget: target });
         }
-        const job = entries.length > 1 ? { id: entries[0].id, requestId: uuid(), entries } : { ...entries[0], requestId: uuid() };
+        const job = entries.length > 1 ? { id: entries[0].id, requestId: uuid(), entries:alignReferences(entries) } : { ...entries[0], requestId: uuid() };
         // 用户选择与不可变内容在一个本机事务中落盘；不修改基准，也不清除冲突。
         for (const entry of entries) {
           if (state.outbox[entry.id]) state.archive.push({ id: entry.id, request: copy(state.outbox[entry.id]), blocked: copy(state.blocked[entry.id]), choice: 'local-replaced-request' });

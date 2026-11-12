@@ -1,12 +1,13 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { createSchema, updateSchema, listSchema, getProjectSchema, itemPatchSchema, completionSchema, deleteSchema, convertSchema } from './domain.js';
+import { createSchema, updateSchema, listSchema, getProjectSchema, itemPatchSchema, completionSchema, deleteSchema, convertSchema, reminderSchema } from './domain.js';
 import { READ_SCOPE, WRITE_SCOPE } from './service.js';
 import { publicError } from './errors.js';
 import { z } from 'zod';
 
 // structuredContent 同时声明 outputSchema；描述既有返回，不改变事项业务格式。
 const itemOutput = z.object({
+  reminder:reminderSchema.optional(),
   id: z.string(), type: z.string(), title: z.string(), tags: z.array(z.string()),
   createdAt: z.string(), updatedAt: z.string(), priority: z.boolean().optional(), favorite: z.boolean().optional(),
   urgent: z.boolean().optional(), done: z.boolean().optional(), completedAt: z.string().nullable().optional(),

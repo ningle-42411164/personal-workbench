@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useRegisterSW } from 'virtual:pwa-register/vue';
+import ReminderBanner from './components/ReminderBanner.vue';
+import {setReminderDate,createReminderQueue} from './data/reminders.js';
 import QuickTagPicker from './components/QuickTagPicker.vue';
 import { sortedCompleted, completedBatchLimit, toggleFavorite } from './data/completedItems.js';
 import TagRuleSettings from './components/TagRuleSettings.vue';
@@ -69,7 +71,7 @@ const viewItems = computed(() => [
 ]);
 function protectOrdinary(id, item) {
   if (item) editingOrdinary.value = { ...editingOrdinary.value, [id]: item };
-  else { const next = { ...editingOrdinary.value }; delete next[id]; editingOrdinary.value = next; }
+  else { const next = { ...editingOrdinary.value }; delete next[id]; editingOrdinary.value = next; queueMicrotask(()=>void checkReminders()); }
 }
 // computed 是“从已有数据算出结果”，不是第二份数据库；items 改变时，这个待办视图也会重新计算。
 const tasks = computed(() => viewItems.value.filter(item => item.type === 'todo'));
@@ -96,6 +98,7 @@ function removeQuickTag(tag) {
 }
 function saveTagRules(rules) { writeTagRules(rules); tagRules.value = rules; tagRulesError.value = ''; }
 const quickTargetDate = ref('');
+const quickReminderDate = ref('');
 const quickTypes = [
   { type: 'todo', label: '待办' }, { type: 'importantDate', label: '重要日' },
   { type: 'project', label: '项目' }, { type: 'shopping', label: '购物' },
@@ -202,6 +205,28 @@ const storageReadable = ref(false);
 const localSaving = ref(false);
 const canEditLocal = computed(() => storageReadable.value && !localSaving.value);
 let localRevision = -1;
+const reminderQueue=createReminderQueue({storage:localStorage}), reminderBanner=ref(null);
+let reminderCheck;
+function showReminders(){
+  if(document.visibilityState==='hidden' || document.documentElement.classList.contains('splash-pending'))return;
+  reminderBanner.value=reminderQueue.open(personalItems.value);
+}
+async function checkReminders(){
+  if(!storageReadable.value || document.visibilityState==='hidden')return;
+  if(reminderCheck)return reminderCheck;
+  reminderCheck=(async()=>{
+    try{await sync.checkReminders(new Date().toISOString(),Object.keys(editingOrdinary.value));showReminders();}
+    catch(error){message.value=error.message;}
+    finally{reminderCheck=null;}
+  })();
+  return reminderCheck;
+}
+function acknowledgeReminder(){reminderBanner.value=reminderQueue.acknowledge(personalItems.value);}
+watch(personalItems,()=>{
+  if(document.visibilityState!=='hidden')reminderBanner.value=reminderQueue.reconcile(personalItems.value);
+  // 云端新日期在本机自然日检查；编辑保护仍由 ID 排除。
+  if(storageReadable.value && !localSaving.value)void checkReminders();
+});
 try {
   workbenchData.value = readWorkbenchData();//先显示旧 v2 备份；事务存储就绪后才开放编辑。
 } catch (error) {
@@ -213,6 +238,7 @@ watch(syncSnapshot, next => {
 });
 void sync.initialize().then(next => {
   workbenchData.value = next.data; localRevision = next.revision; storageReadable.value = true;
+  void checkReminders();
 }).catch(error => { storageReadable.value = false; message.value = error.message; });
 
 // filter 先生成新数组，再 sort 排序，所以首页分组不会直接重排持久化的 items。
@@ -337,12 +363,16 @@ function refreshToday() {
 onMounted(() => {
   refreshToday();
   document.addEventListener('visibilitychange', refreshToday);
+  document.addEventListener('visibilitychange', checkReminders);
+  window.addEventListener('pageshow',checkReminders);
 });
 onBeforeUnmount(() => {
   // 组件移除时同时清理定时器与 document 监听，避免旧页面逻辑继续运行。
   clearTimeout(midnightTimer);
   clearTimeout(highlightTimer);
   document.removeEventListener('visibilitychange', refreshToday);
+  document.removeEventListener('visibilitychange',checkReminders);
+  window.removeEventListener('pageshow',checkReminders);
 });
 
 async function toggleProjectDetails(id) {
@@ -370,9 +400,10 @@ async function saveTasks(nextTasks) {//nextTasks是这个函数接收的参数
     const items = nextTasks.map(item => !previousIds.has(item.id) && item.type !== 'routine' && item.rank === undefined
       ? {...item,rank:frontRank(nextTasks,item)} : item);
     const nextData = { ...workbenchData.value, items };
-    const saved = await sync.save(nextData, localRevision);//仍保存完整 v2 内容，队列存放在独立元数据中。
+    const saved = await sync.save(nextData, localRevision, {reminderNow:new Date().toISOString(),skipReminderIds:Object.keys(editingOrdinary.value).filter(id=>equal(nextTasks.find(item=>item.id===id),workbenchData.value.items.find(item=>item.id===id)))});//仍保存完整 v2 内容，队列存放在独立元数据中。
     workbenchData.value = saved.data; localRevision = saved.revision;//事务成功后再更新页面
     message.value = '';
+    showReminders();
     return true;
   } catch (error) {
     message.value = error.message || '保存失败，请检查浏览器是否允许本地存储。';
@@ -398,6 +429,9 @@ async function addTask() {
       ? createImportantDate(title.value.trim(), quickTargetDate.value, now, needProcessing.value)
       : createSimpleItem(quickType.value, title.value.trim(), now, needProcessing.value);
   item.tags = normalizeUserTags(selectedQuickTags.value);
+  if(item.type==='waiting' && quickReminderDate.value){
+    try{Object.assign(item,setReminderDate(item,quickReminderDate.value,now));}catch(error){message.value=error.message;return;}
+  }
   // 先生成新数组交给保存入口，只有返回 true 才清空草稿，失败时输入和标签保留。
   if (await saveTasks([...workbenchData.value.items, item])) {
     if (creationText[item.type]) notify(creationText[item.type]);
@@ -407,6 +441,7 @@ async function addTask() {
     urgent.value = false;
     quickType.value = 'default';
     quickTargetDate.value = '';
+    quickReminderDate.value = '';
     showMoreOptions.value = false;
   }//把旧，新任务丢上浏览器保存后清空输入框
 }
@@ -629,8 +664,9 @@ async function confirmImport() {
 </script>
 
 <template>
-  <LaunchSplash v-if="showSplash" />
+  <LaunchSplash v-if="showSplash" @finished="showReminders" />
   <main>
+    <ReminderBanner :item="reminderBanner" :today="today" @acknowledge="acknowledgeReminder" />
     <SuccessMessages ref="successMessages" @locate="locateCompleted" />
     <header><SyncSymbol :snapshot="syncSnapshot" :status="syncStatus" :auth="cloudState.auth" :local-fallback="localFallback" /><span class="eyebrow">Personal Workbench</span><h1>欢迎回来，从哪里开始干活？</h1></header>
     <div v-if="needRefresh" class="notice">有新版本可用。<button @click="updateServiceWorker()">更新应用</button></div>
@@ -678,6 +714,7 @@ async function confirmImport() {
           <button v-for="option in quickTypes" :key="option.type" type="button" :aria-pressed="quickType === option.type" @click="quickType = option.type; onQuickTypeChange()">{{ option.label }}</button>
           <button v-if="quickType !== 'default'" type="button" @click="quickType = 'default'; onQuickTypeChange()">清除选择</button>
         </div>
+        <div v-if="quickType === 'waiting'" class="quick-reminder reminder-editor"><div class="reminder-field-head"><label for="quick-reminder-date">提醒</label><QuickHelp label="提醒说明">填写任务当天日期，提前一天转入待办并提醒。</QuickHelp></div><input id="quick-reminder-date" v-model="quickReminderDate" type="date" :disabled="!canEditLocal"></div>
         <label v-if="quickType === 'importantDate'" for="quick-target-date">目标日期</label>
         <input v-if="quickType === 'importantDate'" id="quick-target-date" v-model="quickTargetDate" type="date" :disabled="!canEditLocal">
       </div>

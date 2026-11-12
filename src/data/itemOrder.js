@@ -1,3 +1,4 @@
+import { activeReminder, compareReminders, stopReminder } from './reminders.js';
 import { generateKeyBetween } from 'fractional-indexing';
 // 旧待办可能只有 urgent。直接推导有效置顶，无须为读取旧数据创建同步操作。
 export function isPinned(item) {
@@ -10,6 +11,7 @@ export function togglePin(item) {
 }
 export function subgroup(item) {
   if (item.type === 'project') return (item.status === 'paused' ? 2 : 0) + (item.pinned ? 0 : 1);
+  if (activeReminder(item)) return -1;
   if (item.type === 'todo') return item.urgent ? 0 : item.pinned ? 1 : 2;
   return item.pinned ? 0 : 1;
 }
@@ -18,6 +20,7 @@ export const rankOf = item => item.rank ?? -Date.parse(item.createdAt);
 const tieOf = item => item.rankTie ?? 'a0'+Array.from(item.id,c=>c.codePointAt(0).toString(16).padStart(6,'0')).join('')+'V';
 const compareText = (a,b) => a<b?-1:a>b?1:0;
 export function compareRows(a,b) {
+  if (activeReminder(a) && activeReminder(b)) return compareReminders(a,b);
   return subgroup(a)-subgroup(b) || rankOf(a)-rankOf(b) || compareText(tieOf(a),tieOf(b)) || compareText(a.id,b.id);
 }
 export function frontRank(items, item, now = Date.now()) {
@@ -25,6 +28,7 @@ export function frontRank(items, item, now = Date.now()) {
 }
 export function moveRank(rows, from, to) {
   const current = rows[from];
+  if (activeReminder(current)) return null;
   if (!current || !rows[to] || from === to || subgroup(current) !== subgroup(rows[to])) return null;
   const rest = rows.filter(x => x.id !== current.id);
   const left = rest[to-1], right = rest[to];
@@ -40,7 +44,7 @@ export function moveRank(rows, from, to) {
 export function returnTodo(items,id) {
   const old = items.find(x => x.id === id);
   if (old?.type !== 'todo' || old.done) throw new Error('只能退回未完成待办。');
-  const {urgent, ...note} = old;
+  const {urgent, ...note} = stopReminder(old, true);
   note.type = 'note'; note.returnedFromTodo = true; note.rank = frontRank(items,note); note.updatedAt = new Date().toISOString();
   return items.map(x => x.id === id ? note : x);
 }

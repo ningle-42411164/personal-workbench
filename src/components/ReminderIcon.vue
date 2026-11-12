@@ -1,0 +1,1 @@
+<template><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 20h6M5 17h14l-2-3V9a5 5 0 0 0-10 0v5zM12 2v2"/></svg></template>

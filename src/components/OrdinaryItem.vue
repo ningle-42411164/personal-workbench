@@ -1,5 +1,7 @@
 <script setup>
 import { nextTick, ref, onBeforeUnmount } from 'vue';
+import ReminderEditor from './ReminderEditor.vue';
+import {activeReminder,canEditReminder} from '../data/reminders.js';
 import PinnedMark from './PinnedMark.vue';
 import FavoriteStar from './FavoriteStar.vue';
 import { renameItem } from '../data/workbenchData.js';
@@ -19,6 +21,8 @@ const inputControl = ref(null);
 const error = ref('');
 const saving = ref(false);
 let editingBase;
+const reminderEditor=ref(null),dateEditing=ref(false);
+function protectDate(id,base){dateEditing.value=Boolean(base);emit('editing',id,base);}
 
 function formatTime(value) {
   const date = new Date(value);
@@ -26,6 +30,7 @@ function formatTime(value) {
   return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${clock}`;
 }
 async function beginEdit() {
+  if(reminderEditor.value && !await reminderEditor.value.finishEditing())return;
   draft.value = props.item.title;
   editingBase = JSON.parse(JSON.stringify(props.item));
   emit('editing', props.item.id, editingBase);
@@ -46,18 +51,18 @@ async function saveName() {
     else error.value = '保存未完成，输入保留；请核对是否有其他窗口或云端修改。';
   } finally { saving.value = false; }
 }
-async function toggleDetail(){if(editing.value){await saveName();if(editing.value)return;}emit('expand');}
-async function finishEditing(){if(editing.value)await saveName();return !editing.value;}
+async function toggleDetail(){if(reminderEditor.value && !await reminderEditor.value.finishEditing())return;if(editing.value){await saveName();if(editing.value)return;}emit('expand');}
+async function finishEditing(){if(editing.value)await saveName();return !editing.value && (!reminderEditor.value || await reminderEditor.value.finishEditing());}
 defineExpose({finishEditing});
 function cancelName() { if (!saving.value) { editing.value = false; emit('editing', props.item.id, null); } }
 onBeforeUnmount(() => emit('editing', props.item.id, null));
 </script>
 
 <template>
-  <div class="todo-row ordinary-item" :class="{ completed: item.done, 'converted-note': item.convertedToId }">
+  <div class="todo-row ordinary-item" :class="{ 'reminder-active':activeReminder(item), completed: item.done, 'converted-note': item.convertedToId }">
     <!-- 行本身不绑定完成或展开；各控件独立响应，也保留页面原有的卡片外关闭行为。 -->
     <label class="todo-check">
-      <input type="checkbox" :checked="Boolean(item.done)" :disabled="!canEdit || editing" :aria-label="`${item.done ? '恢复' : '完成'} ${item.title}`" @change.stop="emit('complete')">
+      <input type="checkbox" :checked="Boolean(item.done)" :disabled="!canEdit || editing || dateEditing" :aria-label="`${item.done ? '恢复' : '完成'} ${item.title}`" @change.stop="emit('complete')">
     </label>
     <div class="todo-summary">
       <button type="button" class="todo-title" :disabled="saving" :aria-expanded="expanded" @click="toggleDetail">
@@ -65,7 +70,7 @@ onBeforeUnmount(() => emit('editing', props.item.id, null));
       </button>
       <div v-if="item.priority === true" class="todo-status"><span v-if="item.priority === true" class="urgent-mark">优先处理</span></div>
     </div>
-    <FavoriteStar v-if="item.done && expanded" :item="item" :disabled="!canEdit || editing || saving" :save-favorite="saveFavorite" />
+    <FavoriteStar v-if="item.done && expanded" :item="item" :disabled="!canEdit || editing || dateEditing || saving" :save-favorite="saveFavorite" />
     <PinnedMark v-else-if="!item.done" :item="item" />
     <div v-if="expanded" class="todo-detail">
       <form v-if="editing" class="ordinary-name-editor" @submit.prevent="saveName">
@@ -74,7 +79,8 @@ onBeforeUnmount(() => emit('editing', props.item.id, null));
         <div class="form-buttons"><button type="button" class="secondary edit-button" :disabled="saving" @click="saveName">编辑</button><button type="button" class="secondary" :disabled="saving" @click="cancelName">取消</button><button :disabled="!canEdit || saving">保存</button></div>
       </form>
       <template v-else>
-        <div class="detail-actions"><button v-if="item.type === 'todo' && !item.done" type="button" class="secondary" :disabled="!canEdit" @click="emit('return-note')">退回随笔</button><button type="button" class="text-button danger delete-button" :disabled="!canEdit" @click="emit('delete')">删除</button><button type="button" class="secondary edit-button" :disabled="!canEdit" @click="beginEdit">编辑</button></div>
+        <div class="detail-actions"><button v-if="item.type === 'todo' && !item.done" type="button" class="secondary" :disabled="!canEdit || dateEditing" @click="emit('return-note')">退回随笔</button><button type="button" class="text-button danger delete-button" :disabled="!canEdit || dateEditing" @click="emit('delete')">删除</button><button type="button" class="secondary edit-button" :disabled="!canEdit" @click="beginEdit">编辑</button></div>
+        <ReminderEditor v-if="canEditReminder(item)" ref="reminderEditor" :item="item" :can-edit="canEdit" :save-item="saveItem" @editing="protectDate" />
         <slot />
       </template>
     </div>

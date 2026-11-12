@@ -55,9 +55,10 @@ export class WorkbenchService {
     if (parsed.expectedVersion === 0) return this.store.create(parsed.requestId, hash, syncItem(parsed));
     const current = await this.getItem({ id: parsed.id });
     if (current.version !== parsed.expectedVersion) throw new ApiError(409, 'VERSION_CONFLICT', '记录已变化，本机修改保留待比较。');
+    if (parsed.moveFrom === 'waiting' && (await this.store.references(parsed.id)).length) throw new ApiError(400,'BATCH_REQUIRED','提醒转换与来源关联必须一起同步。');
     const item = syncItem(parsed, current.item);
     if (parsed.moveFrom) {
-      if (current.item.type !== 'note' || item.type === 'note') throw new ApiError(400, 'INVALID_INPUT', '移动来源或目标无效。');
+      if (current.item.type !== parsed.moveFrom || item.type === parsed.moveFrom) throw new ApiError(400, 'INVALID_INPUT', '移动来源或目标无效。');
       const response = await this.store.syncBatch(parsed.requestId, hash, [{ id: parsed.id, current, item }]);
       return response.records[0];
     }
@@ -75,6 +76,11 @@ export class WorkbenchService {
     for (const entry of parsed.entries) {
       const current = states.current.get(entry.id), deleted = states.deleted.has(entry.id);
       if (deleted || !entry.item && !current) throw new ApiError(409, 'VERSION_CONFLICT', '关联记录已删除或不存在，双方内容保留。');
+      if (entry.expectedVersion > 0 && entry.expectedVersion !== (current?.version ?? 0)) throw new ApiError(409,'VERSION_CONFLICT','关联记录版本已变化，整个批次未提交。');
+      if (entry.moveFrom === 'waiting') {
+        const linked=await this.store.references(entry.id);
+        if (linked.some(record=>!parsed.entries.some(value=>value.id===record.item.id && value.item?.convertedToId===entry.id && value.item.convertedToType==='todo' && value.item.convertedAt===record.item.convertedAt))) throw new ApiError(400,'BATCH_REQUIRED','提醒转换必须保留来源关联与原录入时间。');
+      }
       const item = entry.item ? syncItem(entry, current?.item, references) : null;
       // 手机首次纳入时允许接续完全相同的既有记录；不同内容仍产生冲突。
       const same = current && item === current.item;

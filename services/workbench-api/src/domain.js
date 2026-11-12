@@ -1,3 +1,4 @@
+import { initialReminderSnapshot } from '../../../src/data/reminders.js';
 import { z } from 'zod';
 import { createTodo, createNote, createRoutine, createImportantDate, createSimpleItem,
   initialMoveSnapshot, canMoveNote, createProject, updateProject, validateWorkbenchData, isCalendarDate, COMPLETABLE_TYPES, toggleTodo } from '../../../src/data/workbenchData.js';
@@ -30,8 +31,9 @@ export const convertSchema = z.object({ ...versioned, mode: z.literal('move').op
 const timestamp = z.string().datetime();
 const snapshotBase = { rankTie: z.string().regex(/^[A-Za-z0-9]+$/).max(512).optional(), rank: z.number().finite().optional(), id: z.string().uuid(), title, tags, createdAt: timestamp, updatedAt: timestamp, priority: z.boolean().optional() };
 const sortableSnapshot = { ...snapshotBase, pinned: z.boolean().optional() };
-const completableSnapshot = { ...sortableSnapshot, favorite: z.boolean().optional() };
-export const syncSchema = z.object({ moveFrom: z.literal('note').optional(), requestId, id: z.string().uuid(), expectedVersion: z.number().int().min(0), item: z.discriminatedUnion('type', [
+export const reminderSchema = z.object({date:date.nullable(),state:z.enum(['scheduled','active','stopped']),enteredAt:timestamp.nullable(),triggerDate:date.nullable()}).strict();
+const completableSnapshot = { ...sortableSnapshot, reminder:reminderSchema.optional(), favorite: z.boolean().optional() };
+export const syncSchema = z.object({ moveFrom: z.enum(['note','waiting']).optional(), requestId, id: z.string().uuid(), expectedVersion: z.number().int().min(0), item: z.discriminatedUnion('type', [
   ...['waiting', 'shopping', 'creation'].map(type => z.object({ ...completableSnapshot, type: z.literal(type), done: z.boolean().optional(), completedAt: timestamp.nullable().optional() }).strict()),
   z.object({ ...completableSnapshot, type: z.literal('note'), returnedFromTodo: z.literal(true).optional(), done: z.boolean().optional(), completedAt: timestamp.nullable().optional(), convertedToId: z.string().uuid().optional(), convertedToType: z.enum(['todo', 'project', 'importantDate', 'waiting', 'shopping', 'creation']).optional(), convertedAt: timestamp.optional() }).strict(),
   z.object({ ...snapshotBase, type: z.literal('routine') }).strict(),
@@ -39,7 +41,7 @@ export const syncSchema = z.object({ moveFrom: z.literal('note').optional(), req
   z.object({ ...completableSnapshot, type: z.literal('todo'), urgent: z.boolean(), done: z.boolean(), completedAt: timestamp.nullable() }).strict(),
   z.object({ ...completableSnapshot, type: z.literal('project'), status: z.enum(['active', 'paused', 'done']).nullable().optional(), startDate: date.nullable().optional(), dueDate: date.nullable().optional(), currentSituation: z.string().max(10000).optional(), nextStep: z.string().max(10000).optional(), completedAt: timestamp.nullable().optional(), updates: z.array(z.object({ id: z.string().min(1), content: z.string().max(10000), createdAt: timestamp, field: z.enum(['currentSituation', 'nextStep']).optional(), kind: z.enum(['change', 'archive']).optional() }).strict()).optional() }).strict(),
 ]) }).strict();
-export const syncBatchSchema = z.object({ requestId, entries: z.array(z.object({ moveFrom: z.literal('note').optional(), id: z.string().uuid(), expectedVersion: z.number().int().min(0), item: syncSchema.shape.item.nullable() }).strict()).min(2).max(32) }).strict();
+export const syncBatchSchema = z.object({ requestId, entries: z.array(z.object({ moveFrom: z.enum(['note','waiting']).optional(), id: z.string().uuid(), expectedVersion: z.number().int().min(0), item: syncSchema.shape.item.nullable() }).strict()).min(2).max(32) }).strict();
 
 export function syncItem(input, previous, references = []) {
   const item = { ...input.item, tags: cleanTags(input.item.tags) };
@@ -47,9 +49,12 @@ export function syncItem(input, previous, references = []) {
   if (item.type === 'todo' && previous?.urgent && !item.urgent && item.pinned === undefined) item.pinned = true;
   if (item.id !== input.id || item.type !== 'project' && !item.title.trim()) throw new ApiError(400, 'INVALID_INPUT', '同步事项内容无效。');
   const returning = previous?.type === 'todo' && !previous.done && item.type === 'note' && item.returnedFromTodo === true && !item.done;
-  if (previous && (item.type !== previous.type && !returning && !(input.moveFrom === 'note' && canMoveNote(previous, item.type)) || item.createdAt !== previous.createdAt)) throw new ApiError(400, 'IMMUTABLE_FIELD', '同步不能改变原记录的分类或创建时间。');
+  const reminding = input.moveFrom === 'waiting' && previous?.type === 'waiting' && !previous.done && item.type === 'todo' && item.reminder?.state === 'active';
+  if (previous && (item.type !== previous.type && !returning && !reminding && !(input.moveFrom === 'note' && canMoveNote(previous, item.type)) || item.createdAt !== previous.createdAt)) throw new ApiError(400, 'IMMUTABLE_FIELD', '同步不能改变原记录的分类或创建时间。');
   if (input.moveFrom) {
-    if (!canMoveNote(previous, item.type) || !Number.isFinite(item.rank) ||
+    if (input.moveFrom === 'waiting') {
+      if (!reminding || JSON.stringify(canonical(initialReminderSnapshot(previous,item))) !== JSON.stringify(canonical(item))) throw new ApiError(400,'INVALID_MOVE','提醒转换必须保留原事项内容。');
+    } else if (!canMoveNote(previous, item.type) || !Number.isFinite(item.rank) ||
         JSON.stringify(canonical(initialMoveSnapshot(previous, item))) !== JSON.stringify(canonical(item))) {
       throw new ApiError(400, 'INVALID_MOVE', '移动只能保留来源内容并初始化目标分类。');
     }
