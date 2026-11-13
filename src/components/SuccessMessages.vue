@@ -1,5 +1,6 @@
 <script setup>
 import { ref, watchEffect, onMounted, onBeforeUnmount } from 'vue';
+import { effectHost } from '../data/effectHost.js';
 const emit = defineEmits(['locate']);
 const panel = ref(null);
 const entries = ref([]);
@@ -7,7 +8,7 @@ const host = ref(document.body);
 const timers = new Map();
 let sequence = 0, observer;
 function updateHost() {
-  host.value = document.querySelector('dialog[open]') || document.body;
+  host.value = effectHost(document);
 }
 function push(text, target = null) {
   updateHost();
@@ -45,7 +46,7 @@ defineExpose({push});
 </template>
 <style scoped>
 .success-queue:popover-open { display:flex; }
-.success-queue { inset:auto; margin:0; border:0; padding:0; background:transparent; overflow:visible; position:fixed; z-index:12; right:16px; bottom:calc(18px + env(safe-area-inset-bottom)); flex-direction:column; align-items:end; gap:8px; max-width:calc(100vw - 32px); pointer-events:none; }
+.success-queue { inset:auto; margin:0; border:0; padding:0; background:transparent; overflow:visible; position:fixed; z-index:12; right:16px; bottom:calc(18px + env(safe-area-inset-bottom) + var(--achievement-notice-space, 0px)); flex-direction:column; align-items:end; gap:8px; max-width:calc(100vw - 32px); pointer-events:none; }
 .success-entry { display:flex; align-items:center; gap:8px; max-width:100%; padding:9px 12px; background:var(--panel-1); color:var(--ink); border-radius:8px; box-shadow:0 3px 14px #243d3626; font-size:14px; }
 .success-entry svg { flex:none; }
 .success-entry span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

@@ -1,8 +1,9 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue';
-defineProps({ title: String, requestClose: Function });
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
+import { markDialogOpened, lockDialogPage, unlockDialogPage } from '../data/effectHost.js';
+const props = defineProps({ title: String, requestClose: Function, open: { type:Boolean, default:true } });
 const dialog = ref(null);
-let previous, overflow, outside = false;
+let previous, outside = false;
 function isOutside(event) {
   const r = dialog.value.getBoundingClientRect();
   return event.target === dialog.value && (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom);
@@ -12,18 +13,26 @@ function viewport() {
   dialog.value?.style.setProperty('--card-height', `${v?.height ?? window.innerHeight}px`);
   dialog.value?.style.setProperty('--card-top', `${(v?.offsetTop ?? 0) + (v?.height ?? window.innerHeight) / 2}px`);
 }
-onMounted(() => {
-  previous = document.activeElement; overflow = document.body.style.overflow;
-  document.body.style.overflow = 'hidden'; viewport(); dialog.value.showModal();
+function openCard() {
+  if (!dialog.value || dialog.value.open) return;
+  previous = document.activeElement;
+  lockDialogPage(document,dialog.value); viewport(); markDialogOpened(dialog.value); dialog.value.showModal();
   dialog.value.querySelector('h2').focus();
+}
+function closeCard() {
+  if (!dialog.value?.open) return;
+  dialog.value.close(); unlockDialogPage(document,dialog.value,previous);
+}
+watch(() => props.open, open => open ? openCard() : closeCard(), {flush:'post'});
+onMounted(() => {
+  if (props.open) openCard();
   window.visualViewport?.addEventListener('resize', viewport);
   window.visualViewport?.addEventListener('scroll', viewport);
 });
 onBeforeUnmount(() => {
   window.visualViewport?.removeEventListener('resize', viewport);
   window.visualViewport?.removeEventListener('scroll', viewport);
-  dialog.value?.close(); document.body.style.overflow = overflow;
-  if (previous?.isConnected) previous.focus();
+  closeCard();
 });
 </script>
 <template>

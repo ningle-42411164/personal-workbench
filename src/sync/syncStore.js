@@ -1,3 +1,4 @@
+import { saveAchievementMetadata } from '../data/achievements.js';
 import { applyDueReminders } from '../data/reminders.js';
 import { conversionStep } from './conversionResolution.js';
 import { STORAGE_KEY, emptyWorkbenchData, validateWorkbenchData, removeItem, initialMoveSnapshot, canMoveNote } from '../data/workbenchData.js';
@@ -85,11 +86,12 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
             next.cursor = '0'; delete next.pull; next.syncScopeVersion = SYNC_SCOPE_VERSION;
           }
           const previous = copy(next.data);
+          const previousAchievements = JSON.stringify(next.achievements);
           // 回调必须同步；网络和授权刷新不得放进这个事务。
           result = change(next);
           if (result?.then) throw new Error('本机事务不能等待网络。');
           validateWorkbenchData(next.data);
-          if (!equal(previous, next.data)) next.revision++;
+          if (!equal(previous, next.data) || previousAchievements !== JSON.stringify(next.achievements)) next.revision++;
           changed = before !== JSON.stringify(next);
           store.put(next, 'workbench');
         } catch (error) { failure = error; tx.abort(); }
@@ -108,9 +110,10 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
     read,
     ownerPhone,
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-    async save(data, revision, { importing = false, reminderNow, skipReminderIds = [] } = {}) {
+    async save(data, revision, options = {}) {
+      const { importing = false, reminderNow, skipReminderIds = [] } = options;
       validateWorkbenchData(data);
-      return (await transact(state => {
+      const saved = await transact(state => {
         expected(state, revision);
         if (importing && Object.keys(state.bindings).length) throw new Error('已有同步记录，不能用整份备份覆盖。请保留备份，先完成首次纳入/冲突核对。');
         const oldIds = new Set(state.data.items.map(item => item.id));
@@ -128,7 +131,9 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
           }
           dirty(state, id);
         }
-      })).state;
+        return saveAchievementMetadata(state, previous, options);
+      });
+      return { ...saved.state, localEffects:saved.result };
     },
     async checkReminders(reminderNow, skipIds = []) {
       return (await transact(state => {

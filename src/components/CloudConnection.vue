@@ -29,7 +29,7 @@ const labels = { checking: '恢复连接中', authorizing: '等待授权', signi
     <div v-if="browserHandoff" class="cloud-message" role="status">
       <p>桌面入口首次连接或增加权限，请在 Edge 普通浏览器完成，避免授权页丢失浏览器绑定。完成后返回这里检查连接，后续打开会自动恢复。</p>
       <p><a :href="browserConnectionUrl" target="_blank" rel="noopener noreferrer">打开普通浏览器连接入口</a></p>
-      <p>若打开后仍没有地址栏，请在 Edge 浏览器地址栏输入：{{ browserConnectionUrl }}。展开页尾“云端连接”完成所需授权。</p>
+      <p>若打开后仍没有地址栏，请在 Edge 浏览器地址栏输入：{{ browserConnectionUrl }}。点击页尾“云端连接”的“设置”，在弹窗中完成所需授权。</p>
       <button type="button" class="secondary" :disabled="busy" @click="$emit('resume')">已在浏览器完成，检查连接</button>
     </div>
     <p class="cloud-note">{{ state.auth.message }}</p>

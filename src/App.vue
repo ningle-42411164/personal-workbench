@@ -1,6 +1,9 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useRegisterSW } from 'virtual:pwa-register/vue';
+import AchievementHall from './components/AchievementHall.vue';
+import CelebrationEffects from './components/CelebrationEffects.vue';
+import { emptyAchievements, parseBackup, exportBackup } from './data/achievements.js';
 import ReminderBanner from './components/ReminderBanner.vue';
 import {setReminderDate,createReminderQueue} from './data/reminders.js';
 import {PRODUCT,OFFLINE} from './product.js';
@@ -40,6 +43,9 @@ const cloudState = cloud.state;
 const sync = useSyncWorkbench();
 const syncSnapshot = sync.snapshot;
 const syncStatus = sync.status;
+const achievementArchive = computed(() => syncSnapshot.value?.achievements ?? emptyAchievements());
+const achievementHallOpen = ref(false), selectedAchievement = ref(null), celebrationEffects = ref(null);
+function openAchievement(id = null) { selectedAchievement.value = typeof id==='string' ? id : null; achievementHallOpen.value=true; }
 // 仅合并同一次离线事件产生的重复提示；其他授权/读取/同步错误原样保留。
 const repeatedOffline = computed(() => syncStatus.value.phase === 'offline' && cloudState.value.message === '离线／内容可能已过期。联网后可重新读取；本批没有离线写入。');
 const splashEnabled = ref(readSplashEnabled());
@@ -159,12 +165,12 @@ const showProjects = ref(false);
 const projectPreview = ref(true);
 const showOpenTodos = ref(true);
 const today = ref(new Date());
-const pendingImport = ref(null);
+const pendingImport = ref(null), pendingAchievements = ref(undefined);
 const importOpen = ref(false), readingImport = ref(false);
 let importReadSequence = 0;
 function openImport() {
   importReadSequence++;
-  pendingImport.value = null; pendingFileName.value = ''; importError.value = '';
+  pendingImport.value = null; pendingAchievements.value = undefined; pendingFileName.value = ''; importError.value = '';
   readingImport.value = false; importOpen.value = true;
 }
 const pendingFileName = ref('');
@@ -197,7 +203,7 @@ async function locateSearch(id) {
   highlighted.value = id;
   clearTimeout(highlightTimer); highlightTimer = setTimeout(() => { highlighted.value = null; }, 1000);
 }
-function cancelImport() { if (!importing.value) { importReadSequence++; importOpen.value = false; readingImport.value = false; pendingImport.value = null; pendingFileName.value = ''; importError.value = ''; } }
+function cancelImport() { if (!importing.value) { importReadSequence++; importOpen.value = false; readingImport.value = false; pendingImport.value = null; pendingAchievements.value = undefined; pendingFileName.value = ''; importError.value = ''; } }
 // 插件把 SW 的安装/更新事件转换成 Vue 状态；这不是 LocalStorage 保存成功的通知。
 const { offlineReady, needRefresh, updateServiceWorker } = useRegisterSW();
 
@@ -277,7 +283,9 @@ function visibleCategoryItems(type) {
 
 const projectCreate = ref(null);
 const sorting = ref(null), successMessages = ref(null), highlighted = ref(null);
-let highlightTimer;
+let highlightTimer, sortSession = null;
+// 每次进出/切换分类都换会话；刷新不会续接存档中的旧拖动进度。
+watch(sorting, type => { sortSession = type ? crypto.randomUUID() : null; }, {flush:'sync'});
 const notify = (text, target) => successMessages.value?.push(text, target);
 watch(fallbackNotice, () => notify('已转为本地模式'));
 const creationText = { note:'随笔+1', todo:'待办+1', project:'已创建新项目！' };
@@ -339,7 +347,7 @@ async function moveRow(rows,from,to) {
     const rank = moveRank(rows, from, to);
     if (!rank) return;
     const items = workbenchData.value.items.map(item => item.id === rows[from].id ? { ...item, ...rank } : item);
-    if (await saveTasks(items)) notify('排序已更新');
+    if (await saveTasks(items, {source:'ui',kind:'move',id:rows[from].id,category:sorting.value,session:sortSession})) notify('排序已更新');
   } catch (error) { message.value = error.message; }
 }
 async function pinRow(item) {
@@ -393,7 +401,7 @@ async function createFullProject(project) {
 // 先确认保存成功，再更新页面，避免出现“看似保存但实际丢失”。
 // 这个 saveTasks 仍负责浏览器保存和 Vue 状态；现在等待 IndexedDB 把事项与队列一起提交。
 // 网络发送在保存成功之后自动安排，断网不影响本机事务成功。
-async function saveTasks(nextTasks) {//nextTasks是这个函数接收的参数
+async function saveTasks(nextTasks, localAction) {//nextTasks是这个函数接收的参数
   if (!canEditLocal.value) return false;
   localSaving.value = true;
   try {
@@ -401,9 +409,10 @@ async function saveTasks(nextTasks) {//nextTasks是这个函数接收的参数
     const items = nextTasks.map(item => !previousIds.has(item.id) && item.type !== 'routine' && item.rank === undefined
       ? {...item,rank:frontRank(nextTasks,item)} : item);
     const nextData = { ...workbenchData.value, items };
-    const saved = await sync.save(nextData, localRevision, {reminderNow:new Date().toISOString(),skipReminderIds:Object.keys(editingOrdinary.value).filter(id=>equal(nextTasks.find(item=>item.id===id),workbenchData.value.items.find(item=>item.id===id)))});//仍保存完整 v2 内容，队列存放在独立元数据中。
+    const saved = await sync.save(nextData, localRevision, {localAction,reminderNow:new Date().toISOString(),skipReminderIds:Object.keys(editingOrdinary.value).filter(id=>equal(nextTasks.find(item=>item.id===id),workbenchData.value.items.find(item=>item.id===id)))});//仍保存完整 v2 内容，队列存放在独立元数据中。
     workbenchData.value = saved.data; localRevision = saved.revision;//事务成功后再更新页面
     message.value = '';
+    celebrationEffects.value?.accept(saved.localEffects);
     showReminders();
     return true;
   } catch (error) {
@@ -505,7 +514,7 @@ async function toggleTask(id) {
   const item = workbenchData.value.items.find(row => row.id === id);
   if (!item || !COMPLETABLE_TYPES.includes(item.type)) return;
   const next = toggleTodo(item);
-  if (await saveTasks(workbenchData.value.items.map(row => row.id === id ? next : row))) completedMessage(next, next.done);
+  if (await saveTasks(workbenchData.value.items.map(row => row.id === id ? next : row), {source:'ui',kind:'complete',id})) completedMessage(next, next.done);
 }
 // { ...task }展开task属性；完成状态与完成时间一起改变。
 
@@ -541,7 +550,7 @@ async function saveProject(nextProject) {
   const previous = workbenchData.value.items.find(item => item.id === nextProject.id && item.type === 'project');
   if (equal(previous,nextProject)) return true;
   if (previous) nextProject = {...nextProject,rank:frontRank(personalItems.value,nextProject)};
-  if (!previous || !await saveTasks(workbenchData.value.items.map(item => item.id === nextProject.id ? nextProject : item))) return false;
+  if (!previous || !await saveTasks(workbenchData.value.items.map(item => item.id === nextProject.id ? nextProject : item), {source:'ui',kind:'complete',id:nextProject.id})) return false;
   if (previous.status !== nextProject.status && (previous.status === 'done' || nextProject.status === 'done')) completedMessage(nextProject, nextProject.status === 'done');
   else if (previous.status !== 'paused' && nextProject.status === 'paused') notify('项目已暂停');
   else if (previous.status === 'paused' && nextProject.status === 'active') notify('项目已恢复进行中');
@@ -591,7 +600,7 @@ async function deleteItem(id) {
   const linkedNote = workbenchData.value.items.some(candidate => candidate.type === 'note' && candidate.convertedToId === id);
   const linkNotice = linkedNote ? '\n关联随笔会恢复为“未录入”，不会被删除。' : '';
   if (!window.confirm(`确定删除${typeLabel}“${item.title}”（创建于 ${new Date(item.createdAt).toLocaleString()}）吗？${linkNotice}\n此操作不能撤销。`)) return false;
-  if (!await saveTasks(removeItem(workbenchData.value.items, id))) return false;
+  if (!await saveTasks(removeItem(workbenchData.value.items, id), {source:'ui',kind:'delete',id})) return false;
   notify(`已删除「${item.title}」`);
   selectedTodoId.value = null;
   selectedDetailId.value = null;
@@ -620,7 +629,7 @@ function closeImportantForm() {
 function exportTasks() {
   if (!storageReadable.value) return;
   // JSON 文本装进 Blob，再用临时 URL 交给下载链接；它不是上传到服务器的地址。
-  const url = URL.createObjectURL(new Blob([JSON.stringify(workbenchData.value, null, 2)], { type: 'application/json' }));
+  const url = URL.createObjectURL(new Blob([JSON.stringify(exportBackup(syncSnapshot.value.data, syncSnapshot.value.achievements), null, 2)], { type: 'application/json' }));
   const link = document.createElement('a');
   link.href = url; link.download = 'workbench-backup-v2.json'; link.click();
   // 触发下载后释放临时 URL，避免反复导出留下不必要的内存引用。
@@ -632,7 +641,7 @@ async function chooseBackup(event) {
   const file = event.target.files?.[0];
   event.target.value = '';
   const readSequence = ++importReadSequence;
-  pendingImport.value = null; pendingFileName.value = '';
+  pendingImport.value = null; pendingAchievements.value = undefined; pendingFileName.value = '';
   importError.value = '';
   if (!file) return;
   if (!storageReadable.value) return;
@@ -641,7 +650,8 @@ async function chooseBackup(event) {
     readingImport.value = true;
     const data = JSON.parse(await file.text());
     if (readSequence !== importReadSequence || !importOpen.value) return;
-    pendingImport.value = validateWorkbenchData(data);
+    const backup = parseBackup(data);
+    pendingImport.value = backup.data; pendingAchievements.value = backup.achievements;
     pendingFileName.value = file.name;
     message.value = '';
   } catch (error) {
@@ -654,7 +664,7 @@ async function confirmImport() {
   importing.value = true; importError.value = '';
   try {
     // 用户确认也不等于成功：必须写入成功，才替换响应式数据并显示成功提示。
-    const saved = await sync.save(pendingImport.value, localRevision, { importing: true });
+    const saved = await sync.save(pendingImport.value, localRevision, { importing: true, importedAchievements: pendingAchievements.value });
     workbenchData.value = saved.data; localRevision = saved.revision;
     pendingImport.value = null; importOpen.value = false; importReadSequence++;
     notify('备份导入成功，当前记录已替换。');
@@ -669,6 +679,7 @@ async function confirmImport() {
   <main>
     <ReminderBanner :item="reminderBanner" :today="today" @acknowledge="acknowledgeReminder" />
     <SuccessMessages ref="successMessages" @locate="locateCompleted" />
+    <CelebrationEffects ref="celebrationEffects" @open="openAchievement" />
     <header><SyncSymbol :snapshot="syncSnapshot" :status="syncStatus" :auth="cloudState.auth" :local-fallback="localFallback" /><span class="eyebrow">Personal Workbench · {{ PRODUCT.label }} {{ PRODUCT.version }}</span><h1>欢迎回来，从哪里开始干活？</h1></header>
     <div v-if="needRefresh" class="notice">有新版本可用。<button @click="updateServiceWorker()">更新应用</button></div>
     <!-- 原首页继续使用同一个 v2 集合；所有者连接后八类事项由事务队列同步，未连接访客只保存本机。 -->
@@ -840,22 +851,24 @@ async function confirmImport() {
       <p v-if="splashPreferenceError" class="error" role="alert">{{ splashPreferenceError }}</p>
       <div v-if="!OFFLINE" class="footer-row">
         <div class="footer-label">云端连接<QuickHelp label="云端连接说明">云端仅供所有者连接。连接后，支持的事项会自动同步，日常无需手动上传；本机功能无需登录。</QuickHelp></div>
-        <div class="footer-actions"><button type="button" :aria-expanded="cloudSettingsOpen" aria-controls="footer-cloud-settings" @click="cloudSettingsOpen = !cloudSettingsOpen">设置</button></div>
+        <div class="footer-actions"><button type="button" aria-haspopup="dialog" @click="cloudSettingsOpen = true">设置</button></div>
       </div>
-      <div v-show="cloudSettingsOpen" id="footer-cloud-settings">
+      <ProjectCard v-if="!OFFLINE" title="云端连接" :open="cloudSettingsOpen" :request-close="() => cloudSettingsOpen = false">
         <CloudConnection v-if="!OFFLINE" :offline-summary="repeatedOffline" :state="cloudState" @login="cloud.login()" @enable-write="cloud.login({ write: true })" @resume="cloud.resumeConnection()" @logout="cloud.logout" />
         <SyncSettings v-if="!OFFLINE" :suppress-status-message="repeatedOffline" :snapshot="syncSnapshot" :status="syncStatus" :connection="cloudState" :owner-phone="sync.ownerPhone" @enabled="sync.enabled" @resolve="sync.resolve" />
-      </div>
+      </ProjectCard>
       <div class="footer-row"><span class="footer-label">标签自动匹配</span><div class="footer-actions"><button type="button" aria-haspopup="dialog" @click="tagRulesOpen = true">设置</button></div></div>
+      <div class="footer-row"><span class="footer-label">成就馆</span><div class="footer-actions"><button type="button" aria-haspopup="dialog" @click="openAchievement()">查看</button></div></div>
       <p v-if="tagRulesError" class="error" role="alert">{{ tagRulesError }}</p>
       <GlobalSearch :items="personalItems" :message="searchMessage" @locate="locateSearch" />
     </footer>
+    <AchievementHall v-if="achievementHallOpen" :archive="achievementArchive" :selected="selectedAchievement" @close="achievementHallOpen = false" @replay="celebrationEffects?.replay($event)" />
     <TagRuleSettings v-if="tagRulesOpen" :rules="tagRules" :available="availableProjectTags" :save-rules="saveTagRules" @close="tagRulesOpen = false" />
     <ProjectCard v-if="importOpen" title="导入备份确认" :request-close="cancelImport">
       <p>导入会用备份内容覆盖本机全部记录，请先保留当前备份。</p>
       <label for="backup-file">选择 JSON 备份</label><input ref="backupInput" id="backup-file" type="file" accept=".json,application/json" :disabled="importing" @change="chooseBackup">
       <p v-if="readingImport" role="status">正在校验备份…</p>
-      <template v-if="pendingImport"><p>文件：{{ pendingFileName }}</p><p>备份 {{ pendingImport.items.length }} 条，现有 {{ workbenchData.items.length }} 条。</p></template>
+      <template v-if="pendingImport"><p>文件：{{ pendingFileName }}</p><p>备份 {{ pendingImport.items.length }} 条，现有 {{ workbenchData.items.length }} 条。</p><p>{{ pendingAchievements === undefined ? '旧备份不含成就：保留本机已有成就与统计。' : '此备份包含成就：确认后同时覆盖本机成就与统计，不重播提醒。' }}</p></template>
       <p v-if="importBound">已有同步绑定。整份替换可能影响已同步记录，因此不能确认替换；原记录和待同步修改保持不变。</p>
       <p v-else>确认后将用备份替换本机全部记录，请先保留当前备份。</p>
       <p v-if="importError" class="error" role="alert">{{ importError }}</p>

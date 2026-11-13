@@ -1,14 +1,16 @@
 {
   "cloud": {
-    "version": "2.0.0",
-    "tag": "v2.0.0",
+    "version": "2.1.0",
+    "tag": "v2.1.0",
     "label": "含云版",
-    "base": "/personal-workbench/"
+    "base": "/personal-workbench/",
+    "releaseTitle": "含云版 v2.1.0｜本机成就、项目礼炮与云端设置弹窗"
   },
   "offline": {
-    "version": "1.0.0",
-    "tag": "offline-v1.0.0",
+    "version": "1.1.0",
+    "tag": "offline-v1.1.0",
     "label": "脱机版",
-    "base": "/personal-workbench-offline/"
+    "base": "/personal-workbench-offline/",
+    "releaseTitle": "脱机版 v1.1.0｜本机成就馆与项目完成礼炮"
   }
 }
