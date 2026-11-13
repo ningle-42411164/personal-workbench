@@ -15,6 +15,8 @@
 
 ## 下载
 
+[查看中文更新日志与历史版本](docs/version-history.md)：按版本查看新增功能、修复内容和对应提交，包含旧日期编号与早期演进记录。
+
 - [含云版 v2.0.0 Release](https://github.com/ningle-42411164/personal-workbench/releases/tag/v2.0.0)
   - [专用源码](https://github.com/ningle-42411164/personal-workbench/releases/download/v2.0.0/personal-workbench-v2.0.0-source.zip)
   - [静态网页包](https://github.com/ningle-42411164/personal-workbench/releases/download/v2.0.0/personal-workbench-v2.0.0-web.zip)
@@ -46,4 +48,4 @@
 
 回滚代码与恢复数据是两回事：使用反向提交或重新部署此前验证的静态包，保留现有字段兼容层和数据库；不要清空浏览器存储代替回滚。数据恢复仅在使用者明确选择备份并确认覆盖后执行。
 
-[历史编号对应](docs/version-history.md)。MIT 许可证；第三方依赖遵循各自许可证。手机主要验收环境为华为 Microsoft Edge。
+[中文更新日志与历史编号对应](docs/version-history.md)。MIT 许可证；第三方依赖遵循各自许可证。手机主要验收环境为华为 Microsoft Edge。
