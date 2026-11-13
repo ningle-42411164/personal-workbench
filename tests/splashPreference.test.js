@@ -59,6 +59,7 @@ const bootScript = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 function boot(storage, seen = false, sessionFails = false) {
   let pending = true;
   runInNewContext(bootScript, {
+    setTimeout: () => 1,
     localStorage: storage,
     sessionStorage: { getItem() { if (sessionFails) throw new Error('会话存储不可用'); return seen ? '1' : null; } },
     document: { documentElement: { classList: { remove(name) { if (name === 'splash-pending') pending = false; } } } },

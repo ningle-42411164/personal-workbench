@@ -1,4 +1,5 @@
-export const NODE_ONE_VERSION = '2026.11.12.1';
+import products from '../../release/products.json' with {type:'json'};
+export const NODE_ONE_VERSION = products.cloud.version;
 export const PHONE_ENROLLMENT_VERSION = 1;
 const productionOrigin = 'https://ningle-42411164.github.io';
 

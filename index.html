@@ -41,6 +41,7 @@
       } catch {
         // 无法使用 sessionStorage 时仍展示启动页。
       }
+      setTimeout(() => { document.documentElement.classList.remove('splash-pending'); document.getElementById('boot-splash')?.remove(); }, 6000);
     </script>
   </head>
   <body>

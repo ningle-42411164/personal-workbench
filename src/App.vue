@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRegisterSW } from 'virtual:pwa-register/vue';
 import ReminderBanner from './components/ReminderBanner.vue';
 import {setReminderDate,createReminderQueue} from './data/reminders.js';
+import {PRODUCT,OFFLINE} from './product.js';
 import QuickTagPicker from './components/QuickTagPicker.vue';
 import { sortedCompleted, completedBatchLimit, toggleFavorite } from './data/completedItems.js';
 import TagRuleSettings from './components/TagRuleSettings.vue';
@@ -668,7 +669,7 @@ async function confirmImport() {
   <main>
     <ReminderBanner :item="reminderBanner" :today="today" @acknowledge="acknowledgeReminder" />
     <SuccessMessages ref="successMessages" @locate="locateCompleted" />
-    <header><SyncSymbol :snapshot="syncSnapshot" :status="syncStatus" :auth="cloudState.auth" :local-fallback="localFallback" /><span class="eyebrow">Personal Workbench</span><h1>欢迎回来，从哪里开始干活？</h1></header>
+    <header><SyncSymbol :snapshot="syncSnapshot" :status="syncStatus" :auth="cloudState.auth" :local-fallback="localFallback" /><span class="eyebrow">Personal Workbench · {{ PRODUCT.label }} {{ PRODUCT.version }}</span><h1>欢迎回来，从哪里开始干活？</h1></header>
     <div v-if="needRefresh" class="notice">有新版本可用。<button @click="updateServiceWorker()">更新应用</button></div>
     <!-- 原首页继续使用同一个 v2 集合；所有者连接后八类事项由事务队列同步，未连接访客只保存本机。 -->
     <section class="routine-strip" aria-label="日常持续">
@@ -837,13 +838,13 @@ async function confirmImport() {
       </div>
       <p v-if="themeError" class="error" role="alert">{{ themeError }}</p>
       <p v-if="splashPreferenceError" class="error" role="alert">{{ splashPreferenceError }}</p>
-      <div class="footer-row">
+      <div v-if="!OFFLINE" class="footer-row">
         <div class="footer-label">云端连接<QuickHelp label="云端连接说明">云端仅供所有者连接。连接后，支持的事项会自动同步，日常无需手动上传；本机功能无需登录。</QuickHelp></div>
         <div class="footer-actions"><button type="button" :aria-expanded="cloudSettingsOpen" aria-controls="footer-cloud-settings" @click="cloudSettingsOpen = !cloudSettingsOpen">设置</button></div>
       </div>
       <div v-show="cloudSettingsOpen" id="footer-cloud-settings">
-        <CloudConnection :offline-summary="repeatedOffline" :state="cloudState" @login="cloud.login()" @enable-write="cloud.login({ write: true })" @resume="cloud.resumeConnection()" @logout="cloud.logout" />
-        <SyncSettings :suppress-status-message="repeatedOffline" :snapshot="syncSnapshot" :status="syncStatus" :connection="cloudState" :owner-phone="sync.ownerPhone" @enabled="sync.enabled" @resolve="sync.resolve" />
+        <CloudConnection v-if="!OFFLINE" :offline-summary="repeatedOffline" :state="cloudState" @login="cloud.login()" @enable-write="cloud.login({ write: true })" @resume="cloud.resumeConnection()" @logout="cloud.logout" />
+        <SyncSettings v-if="!OFFLINE" :suppress-status-message="repeatedOffline" :snapshot="syncSnapshot" :status="syncStatus" :connection="cloudState" :owner-phone="sync.ownerPhone" @enabled="sync.enabled" @resolve="sync.resolve" />
       </div>
       <div class="footer-row"><span class="footer-label">标签自动匹配</span><div class="footer-actions"><button type="button" aria-haspopup="dialog" @click="tagRulesOpen = true">设置</button></div></div>
       <p v-if="tagRulesError" class="error" role="alert">{{ tagRulesError }}</p>

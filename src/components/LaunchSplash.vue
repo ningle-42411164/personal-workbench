@@ -13,7 +13,7 @@ let finishTimer;
 let removeTimer;
 
 function finishSplash() {
-  if (!visible.value || closing.value || !splashLoaded.value) return;
+  if (!visible.value || closing.value) return;
 
   closing.value = true;
 
@@ -28,6 +28,7 @@ onMounted(() => {
   document.getElementById('boot-splash')?.remove();
 
   if (!visible.value) return;
+  finishTimer=window.setTimeout(finishSplash,4000);
 
   try {
     sessionStorage.setItem(storageKey, '1');
@@ -59,6 +60,7 @@ function handleLoad() {
       :src="splashUrl"
       style="display:none"
       @load="handleLoad"
+      @error="finishSplash"
   />
 
   <div

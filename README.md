@@ -1,64 +1,49 @@
 # Personal Workbench
 
-A lightweight personal workspace for everyday items and projects, with a Chinese-language interface, browser-local storage, and an optional owner-only cloud test view.
+本机优先的个人工作台，整合待办、项目、标签与日期提醒，支持数据备份及可选云同步。
 
-[Try it online](https://ningle-42411164.github.io/personal-workbench/)
+## 两个产品
 
-## Features
+| 产品 | 版本 | 入口 | 云功能 |
+|---|---|---|---|
+| 含云版 | 2.0.0 | https://ningle-42411164.github.io/personal-workbench/ | 既有所有者授权、同步及 MCP |
+| 独立脱机版 | 1.0.0 | https://ningle-42411164.github.io/personal-workbench-offline/ | 不含云授权、令牌恢复或业务云请求 |
 
-- **Quick capture:** save a note by default, check "Needs handling" to create a to-do, or explicitly choose a supported item type. Priority items stay in their selected category.
-- **Categories:** one-off to-dos, notes, waiting items, entertainment/creative items, shopping, and projects. Lists support expandable previews.
-- **Everyday reminders and important dates:** compact name-only reminders and date cards with days remaining or elapsed, calculated from the local calendar date.
-- **Item actions:** complete and restore to-dos, notes, waiting items, entertainment/creative items, and shopping without changing their original category. Expand an item to see its creation time, edit its name, or delete it with confirmation.
-- **Note conversion:** turn a note into a formal item while keeping the original note marked as recorded; the same note cannot be converted repeatedly.
-- **Projects:** quick or full creation, centered modal details, field-by-field editing, status, optional user tags, start and due dates, current situation, and next step. Switching fields or closing saves valid changes first; failure keeps the editor open with its input. Cancel discards only the current unsaved field. Creation adds one history entry; subsequent changes to the current situation append timestamped updates. Completed projects retain their details and history. See the [implementation and manual acceptance record](docs/project-dialog-2026-10-26.md).
-- **User tags:** projects can have no tags, one tag, or multiple tags. Twelve default choices are available independently of existing items and are combined with tags already saved in the data. User tags are separate from system priority indicators.
-- **JSON backups:** export the complete versioned data, or import a validated backup after confirming replacement of all current records. Import does not merge records.
-- **Cloud test connection (1A/1B):** expand “云端连接” at the bottom to select the isolated cloud view. Local use needs no login. First authorization is read-only; a separate explicit authorization enables creating to-dos and editing supported project fields. Encrypted rotating refresh credentials in a separate IndexedDB restore the connection after reopening. Failed saves retain drafts, uncertain retries reuse the exact request, and version conflicts require manual comparison. Cloud failures preserve the current snapshot. Local items are never automatically uploaded; full offline synchronization is not implemented.
-- **PWA support:** local resource caching, update notifications, app icons, and a skippable launch screen shown once per browser session, with reduced-motion support.
+正式发布状态与对应提交以各产品 Release 为准。两版共享主要业务源码；脱机站点仓库只接收静态发行物。
 
-## Stack
+两版均保留待办、随笔、等待中、购物、娱乐／创作、项目、日常持续、重要日、标签规则、排序、置顶、收藏、项目历史、主题与本机字体、搜索、操作提示、日期提醒和备份。等待提醒按本机自然日提前一天同 ID 转入待办；横幅确认与一小时冷却仅存本机，完成后恢复不重启提醒。
 
-Vue 3, JavaScript, Vite, and `vite-plugin-pwa`. Records are stored in `localStorage` under `personal-workbench.data.v2`, using `schemaVersion: 2` and one `items` collection. The launch screen uses `sessionStorage` for its session flag.
+## 下载
 
-The separate [Cloudflare Worker service](services/workbench-api/README.md) is shared with ChatGPT MCP. There is no user registration, multi-user account system, automatic migration, or full offline synchronization. See [1A authentication](docs/mobile-cloud-1a-2026-10-26.md) and the [1B implementation, acceptance, and learning index](docs/mobile-cloud-1b-2026-10-26.md).
+- [含云版 v2.0.0 Release](https://github.com/ningle-42411164/personal-workbench/releases/tag/v2.0.0)
+  - [专用源码](https://github.com/ningle-42411164/personal-workbench/releases/download/v2.0.0/personal-workbench-v2.0.0-source.zip)
+  - [静态网页包](https://github.com/ningle-42411164/personal-workbench/releases/download/v2.0.0/personal-workbench-v2.0.0-web.zip)
+- [脱机版 v1.0.0 Release](https://github.com/ningle-42411164/personal-workbench/releases/tag/offline-v1.0.0)
+  - [专用源码](https://github.com/ningle-42411164/personal-workbench/releases/download/offline-v1.0.0/personal-workbench-offline-v1.0.0-source.zip)
+  - [静态网页包](https://github.com/ningle-42411164/personal-workbench/releases/download/offline-v1.0.0/personal-workbench-offline-v1.0.0-web.zip)
 
-On the tested Huawei Edge home-screen entry, first authorization needs the ordinary Edge browser because its installed authorization context does not return the required binding cookie. Complete the connection in the browser, then return and check/reopen the installed workbench; its encrypted saved connection restores without repeating daily authorization. The app guides this path and retains the server's cookie, PKCE, owner, and scope checks.
+不要把单一 Latest 当作两产品共同最新版。GitHub 自动生成的 Source code 是通用仓库归档；脱机专用源码附件默认构建脱机版。
 
-## Local development
+## 构建与部署
 
-Use Node.js 24 and npm. From the project directory:
+使用 Node.js 24。源码包解压后执行 npm ci、npm run build；无需任何云凭据即可构建。通用仓库默认含云版，可明确执行 npm run build:cloud、npm run build:offline，或 npm run build:all。版本集中维护于 release/products.json；release/default-product.json 仅选择源码附件的默认产品。
 
-```sh
-npm ci
-npm run dev
-```
+含云产物 dist/ 部署在 /personal-workbench/；脱机产物 dist/offline/ 部署在 /personal-workbench-offline/。本地可执行 node scripts/serve.mjs dist 5181，在 localhost 访问相应入口。静态网页包按 DEPLOY.txt 部署；这是网页，不是 Windows 安装包，不保证双击 HTML 可完整使用。PWA 要求 HTTPS 或 localhost，首次联网等待缓存完成后再离线，更新通过应用提示接受。
 
-Open the address printed by Vite, including the `/personal-workbench/` path (normally `http://localhost:5173/personal-workbench/`).
+含云版服务端需兼容 services/workbench-api 的严格字段和接口，并配置 Worker、OAuth 回调及所有者身份。它不是供普通朋友直接登录的多人云服务。真实部署配置不随专用源码包分发；请参考公开示例重新配置。
 
-Build and preview the production version:
+## 保存、隔离与备份
 
-```sh
-npm run build
-npm run preview
-```
+含云版沿用原 IndexedDB、LocalStorage、授权和同步纳入标记。脱机版使用独立 IndexedDB 事务，不读含云数据库；偏好、主题、标签规则、提醒冷却、会话标记及广播通道采用 offline 命名空间。两个站点使用不同 Service Worker 作用范围和缓存前缀，避免旧含云 PWA 截获脱机入口。不清除整个站点数据。
 
-The preview address is normally `http://localhost:4173/personal-workbench/`. Production output is written to `dist/`. Use the production preview, rather than the development server, to check PWA caching.
+搬数据由使用者主动导出 JSON 并在另一版导入；先展示整份覆盖说明，选择有效文件后再次确认。两版不会自动复制事项或授权。数据 schema 仍为 2，应用改号不触发数据迁移、重新纳入或数据库迁移。
 
-Run the data tests:
+## 验证与发布
 
-```sh
-node --test tests/workbenchData.test.js
-```
+前端 npm test；服务端目录 npm ci --ignore-scripts、npm test、npm run check。npm run build:all 构建两版。
 
-On Windows, use `npm.cmd` if PowerShell blocks `npm.ps1`.
+发布准备应在无无关修改的独立工作树进行：确定并提交代码，运行 node release/package.mjs，从实际 ZIP 解压安装和构建，核对 SOURCE.json / release-info.json 的提交及版本，再绑定两标签。node release/publish.mjs 使用 GitHub 授权上传草稿并发布；已有标签不得移动，已有同名附件必须逐字节一致，已发布附件不得覆盖。普通提交不会自动升号或创建 Release。Pages 工作流同时构建两版；脱机产物同步到独立静态站点仓库，不能删除另一版站点。
 
-## Data and offline limits
+回滚代码与恢复数据是两回事：使用反向提交或重新部署此前验证的静态包，保留现有字段兼容层和数据库；不要清空浏览器存储代替回滚。数据恢复仅在使用者明确选择备份并确认覆盖后执行。
 
-Records belong to the current browser on the current device and site address. Other browsers, devices, and local preview addresses do not automatically share or synchronize them. Clearing browser/site data or browser-managed storage cleanup can remove records. Export backups regularly, especially before importing a replacement backup.
-
-The first visit and initial resource caching require an internet connection. Offline use is available only after caching is ready; the page displays a readiness message when this occurs. Cached resources and local records are not guaranteed to remain available forever. Installation and offline behavior should be checked on the actual device and browser; support is not guaranteed for every phone or tablet.
-
-## Deployment
-
-GitHub Pages hosts the app at [https://ningle-42411164.github.io/personal-workbench/](https://ningle-42411164.github.io/personal-workbench/). The existing workflow in `.github/workflows/deploy-pages.yml` builds and deploys the site on pushes to `main`. The Vite base and PWA scope use `/personal-workbench/`.
+[历史编号对应](docs/version-history.md)。MIT 许可证；第三方依赖遵循各自许可证。手机主要验收环境为华为 Microsoft Edge。

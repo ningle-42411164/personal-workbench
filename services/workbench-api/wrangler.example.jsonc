@@ -1,0 +1,28 @@
+{
+  "name": "your-workbench-api",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-30",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "vars": {
+    "PUBLIC_BASE_URL": "https://YOUR-WORKER.workers.dev",
+    "FRONTEND_ORIGIN": "https://YOUR-PAGES-HOST",
+    "OWNER_GITHUB_ID": "YOUR-NUMERIC-ID"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "your-database",
+      "database_id": "YOUR-DATABASE-ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "YOUR-KV-ID"
+    }
+  ]
+}

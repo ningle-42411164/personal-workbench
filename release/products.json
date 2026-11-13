@@ -1,0 +1,14 @@
+{
+  "cloud": {
+    "version": "2.0.0",
+    "tag": "v2.0.0",
+    "label": "含云版",
+    "base": "/personal-workbench/"
+  },
+  "offline": {
+    "version": "1.0.0",
+    "tag": "offline-v1.0.0",
+    "label": "脱机版",
+    "base": "/personal-workbench-offline/"
+  }
+}
