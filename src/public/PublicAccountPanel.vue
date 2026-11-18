@@ -36,7 +36,7 @@ function close(){props.controller.cancelLogin();props.requestClose();}
         <p>只读：读取当前账号事项。读写：在你确认后创建或更新事项。连接 AI 不会自动关联或上传设备上的本机事项。</p>
         <p v-if="state.signedInAccount">授权管理账号：{{ state.signedInAccount.email }}</p>
         <ul v-if="state.grants.length" class="public-grants"><li v-for="grant in state.grants" :key="grant.id"><span>{{ grant.clientName || grant.clientId || '已授权客户端' }}<small>{{ Array.isArray(grant.scope)?grant.scope.join('、'):grant.scope }}</small></span><button type="button" class="secondary" @click="attempt(()=>controller.revokeGrant(grant.id))">撤销授权</button></li></ul>
-        <p v-else-if="state.signedInAccount">此账号当前没有已列出的外部 AI 授权。</p>
+        <p v-else-if="state.grantsLoaded">此账号当前没有已列出的外部 AI 授权。</p>
       </section>
     </section>
   </ProjectCard>

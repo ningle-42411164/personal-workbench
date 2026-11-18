@@ -96,3 +96,57 @@ test('隔离全链：MCP成功回执→正常30秒同步→真实App显示；A�
  assert.equal((await h.mcp(auth,'list_items')).response.status,401);
  assert.equal((await(await h.call('/api/items',{headers:h.browserHeaders('A')})).json()).items.length,1);
 });
+
+test('授权列表失败后 A 的下一条待办自动到达服务端一次', async t => {
+  const h = await createPublicHarness();
+  const identity = {async authenticate() {
+    const response = await h.call('/api/account', {headers: h.browserHeaders('A')});
+    assert.equal(response.status, 200);
+    return {...await response.json(), getToken: async () => h.token('A')};
+  }};
+  const workspace = createPublicWorkspace({
+    indexedDB: new IDBFactory(), storage: localStorage, identity,
+    config: {ready: true, apiUrl: h.base, mcpUrl: h.base + '/mcp'},
+    fetcher: (url, init) => new URL(url).pathname === '/api/grants'
+      ? Response.json({}, {status: 503}) : h.call(url, init)
+  });
+  const compiled = await compiledApp(workspace);
+  const host = document.createElement('div');
+  document.body.append(host);
+  const app = createApp(compiled.component);
+  app.mount(host);
+  t.after(async () => {
+    app.unmount(); host.remove(); await workspace.close();
+    await h.dispose(); fs.unlinkSync(compiled.output); await window.happyDOM.abort();
+  });
+  await wait(() => document.querySelector('#task-title')?.disabled === false);
+  await workspace.requestSync();
+  await wait(() => workspace.getStatus().phase === 'ready');
+  const row = [...document.querySelectorAll('.footer-row')].find(el => el.textContent.includes('账号与云服务'));
+  button('设置', row).click();
+  await settle();
+  button('连接 AI').click();
+  await wait(() => document.querySelector('.public-account-panel [role=alert]'));
+  const feedback = document.querySelector('.public-account-panel [role=alert]').textContent;
+  document.querySelector('[aria-label="关闭账号与云服务"]').click();
+  await settle();
+  const title = '列表故障后正常保存';
+  const checkbox = document.querySelector('.quick-options input');
+  checkbox.checked = true;
+  checkbox.dispatchEvent(new window.Event('change', {bubbles:true}));
+  input(document.querySelector('#task-title'), title);
+  document.querySelector('.quick-form').dispatchEvent(new window.Event('submit', {bubbles:true,cancelable:true}));
+  await wait(() => workspace.getSnapshot().data.items.some(item => item.title === title));
+  const local = workspace.getSnapshot().data.items.find(item => item.title === title);
+  assert.equal(local.type, 'todo');
+  let records;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const res = await h.call('/api/items', {headers: h.browserHeaders('A')});
+    assert.equal(res.status, 200);
+    records = (await res.json()).items;
+    if (records.length) break;
+    await new Promise(resolve => setTimeout(resolve, 75));
+  }
+  assert.deepEqual(records.map(record => record.item.id), [local.id]);
+  assert.match(feedback, /授权列表未能加载/);
+});

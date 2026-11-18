@@ -21,7 +21,7 @@ function fixture(t){
   const identity={async authenticate(){control.logins++;const id='user_'+control.user;return {id,email:control.user.toLowerCase()+'@example.invalid',async getToken(){if(id!=='user_'+control.user)throw Error('changed session');return id;}};},async signOut(){},cancel(){}};
   const fetcher=async(input,init={})=>{const url=new URL(input);const token=new Headers(init.headers).get('Authorization')?.slice(7);control.calls.push({id:token,path:url.pathname,method:init.method??'GET',body:init.body});if(control.beforeFetch)await control.beforeFetch(url,init);if(!control.online)throw TypeError('isolated offline');
     if(!services[token])return Response.json({code:'UNAUTHORIZED'},{status:401});
-    if(url.pathname==='/api/grants')return Response.json({items:control.grants});
+    if(url.pathname==='/api/grants')return Response.json({items:control.grants}, {status:control.grantsStatus ?? 200});
     if(url.pathname.startsWith('/api/grants/')&&init.method==='DELETE'){control.grants=[];return new Response(null,{status:204});}
     return handleApi(new Request(url,init),services[token],config.apiUrl);
   };
@@ -129,4 +129,32 @@ test('Clerk 加载中取消不会继续登录或请求账户，且未验证回�
   let release,calls=0;const waiting=new Promise(resolve=>release=resolve);class Clerk {constructor(){this.user={id:'user_A'};this.session={getToken:async()=> 'fixture-token'};}async load(){await waiting;}}
   const identity=createPublicIdentity({config,loadSdk:async()=>({Clerk}),fetcher:async()=>{calls++;return Response.json({id:'user_B',email:'b@example.invalid'});}});
   const login=identity.authenticate();identity.cancel();release();await assert.rejects(login,{name:'AbortError'});assert.equal(calls,0);await assert.rejects(identity.authenticate(),/身份核对/);
+});
+
+test('查看授权失败只接续同一有效账号已经开启的同步', async t => {
+  for (const scenario of ['paused', 'anonymous', 'differentAccount', 'unauthorized']) {
+    await t.test(scenario, async t => {
+      const s = fixture(t);
+      const w = s.workspace;
+      let wakes = 0;
+      s.options.engineOptions.schedule = () => ++wakes;
+      await w.initialize();
+      if (scenario !== 'anonymous') await w.requestSync();
+      if (scenario === 'paused') await w.enabled(false);
+      const todo = createTodo('保留在原空间', false, at);
+      await add(w, todo);
+      const priorWakes = wakes;
+      s.control.grantsStatus = scenario === 'unauthorized' ? 401 : 503;
+      if (scenario === 'differentAccount') s.control.user = 'B';
+      await assert.rejects(w.connectAi(), scenario === 'unauthorized' ? /重新验证邮箱/ : /授权列表未能加载/);
+      assert.equal(wakes, priorWakes);
+      if (scenario === 'unauthorized') assert.equal(w.getState().auth.canWrite, false);
+      if (scenario === 'paused' || scenario === 'anonymous') assert.equal(w.getSnapshot().enabled, false);
+      if (scenario === 'differentAccount') assert.equal(w.getSnapshot().publicAccountKey, 'anonymous');
+      const source = await cached(s, scenario === 'anonymous' ? undefined : 'user_A');
+      assert.equal(source.data.items[0].id, todo.id);
+      assert.deepEqual(s.control.calls.map(call => call.path), ['/api/grants']);
+      assert.equal((await s.services.user_B.list({})).items.length, 0);
+    });
+  }
 });
