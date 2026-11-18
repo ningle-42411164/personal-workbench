@@ -20,7 +20,7 @@ export async function restore(plan, includeCurrent=false) {
   const list=await github('/repos/'+REPO+'/actions/runs/'+run.id+'/artifacts?per_page=100');
   const artifact=resumableArtifacts(list.artifacts,run.id===currentId,attempt,includeCurrent)[0];
   if(!artifact)continue;
-  const bytes=await github('/repos/'+REPO+'/actions/artifacts/'+artifact.id+'/zip',{accept:'application/octet-stream',timeout:90000});
+  const bytes=await github('/repos/'+REPO+'/actions/artifacts/'+artifact.id+'/zip',{binary:true,timeout:90000});
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'workbench-resume-')),zip=path.join(dir,'artifact.zip');
   fs.writeFileSync(zip,bytes);extract(zip,path.join(dir,'state'));
   const source=path.join(dir,'state',plan.key),file=path.join(source,'state.json');

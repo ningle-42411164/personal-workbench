@@ -20,6 +20,7 @@ permissions:
 env:
   RELEASE_TARGET: ${{ inputs.target }}
   RELEASE_SHA: ${{ inputs.commit }}
+  RELEASE_CONTROLLER_SHA: ${{ github.sha }}
 jobs:
   prepare:
     runs-on: ubuntu-latest
@@ -39,19 +40,27 @@ jobs:
           ref: ${{ inputs.commit }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Check out fixed release controller
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: .release-controller
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: '24.21.0'
       - name: Restore matching release record
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node release/restore.mjs --target "$RELEASE_TARGET" --sha "$RELEASE_SHA"
+        run: node .release-controller/release/restore.mjs --target "$RELEASE_TARGET" --sha "$RELEASE_SHA"
+      - name: Validate changed release controller
+        run: node .release-controller/release/check-controller.mjs --target "$RELEASE_TARGET" --sha "$RELEASE_SHA"
       - name: Validate, test, build and package selected products
         id: prepare
         env:
           GITHUB_TOKEN: ${{ github.token }}
           OFFLINE_PUBLISH_TOKEN: ${{ secrets.OFFLINE_PUBLISH_TOKEN }}
-        run: node release/execute.mjs --phase prepare --target "$RELEASE_TARGET" --sha "$RELEASE_SHA"
+        run: node .release-controller/release/execute.mjs --phase prepare --target "$RELEASE_TARGET" --sha "$RELEASE_SHA"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -77,6 +86,12 @@ jobs:
         with:
           ref: ${{ inputs.commit }}
           persist-credentials: false
+      - name: Check out fixed release controller
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: .release-controller
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: '24.21.0'
@@ -87,7 +102,7 @@ jobs:
       - name: Preserve completed work from previous attempt
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node release/restore.mjs --target "$RELEASE_TARGET" --sha "$RELEASE_SHA" --current
+        run: node .release-controller/release/restore.mjs --target "$RELEASE_TARGET" --sha "$RELEASE_SHA" --current
       - uses: actions/upload-pages-artifact@v5
         id: pages
         with:
@@ -97,7 +112,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PAGES_ARTIFACT_ID: ${{ steps.pages.outputs.artifact_id }}
-        run: node release/execute.mjs --phase cloud --target "$RELEASE_TARGET" --sha "$RELEASE_SHA"
+        run: node .release-controller/release/execute.mjs --phase cloud --target "$RELEASE_TARGET" --sha "$RELEASE_SHA"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -120,6 +135,12 @@ jobs:
         with:
           ref: ${{ inputs.commit }}
           persist-credentials: false
+      - name: Check out fixed release controller
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: .release-controller
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: '24.21.0'
@@ -136,12 +157,12 @@ jobs:
       - name: Reconcile latest checkpoint including previous failed attempt
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node release/restore.mjs --target "$RELEASE_TARGET" --sha "$RELEASE_SHA" --current
+        run: node .release-controller/release/restore.mjs --target "$RELEASE_TARGET" --sha "$RELEASE_SHA" --current
       - name: Deploy offline, publish and verify public downloads
         env:
           GITHUB_TOKEN: ${{ github.token }}
           OFFLINE_PUBLISH_TOKEN: ${{ secrets.OFFLINE_PUBLISH_TOKEN }}
-        run: node release/execute.mjs --phase finish --target "$RELEASE_TARGET" --sha "$RELEASE_SHA"
+        run: node .release-controller/release/execute.mjs --phase finish --target "$RELEASE_TARGET" --sha "$RELEASE_SHA"
       - uses: actions/upload-artifact@v7
         if: always()
         with:

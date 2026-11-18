@@ -1,3 +1,5 @@
+// 隔离测试报告不能写入正式工作流的输出或 Summary。
+delete process.env.GITHUB_OUTPUT;delete process.env.GITHUB_STEP_SUMMARY;
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
 import YAML from 'yaml';
 import {execFileSync} from 'node:child_process';import {fileURLToPath,pathToFileURL} from 'node:url';
@@ -84,7 +86,7 @@ test('prepare 两版构建均失败时真实执行器以失败退出，不报成
  const g=(...args)=>execFileSync('git',args,{cwd:dir,stdio:'pipe',encoding:'utf8'}).trim();g('init');g('add','.');g('-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-m','fixture');const sha=g('rev-parse','HEAD');
  const p={...plan('both'),commit:sha,key:'both-'+sha},ctx=context(p,path.join(dir,'.release',p.key));ctx.state.steps.tests={status:'success',result:{passed:true,input:sha}};ctx.save();
  const mock=path.join(dir,'network.mjs');fs.writeFileSync(mock,`globalThis.fetch=async url=>{const p=new URL(url).pathname;if(p.includes('/commits/'))return new Response('{}');if(p.includes('/git/ref/tags/'))return new Response('{}',{status:404});if(p==='/repos/${OFFLINE_REPO}')return new Response('{}');throw Error('unexpected '+p);};`);
- assert.throws(()=>execFileSync(process.execPath,['--import',pathToFileURL(mock).href,fileURLToPath(new URL('../release/execute.mjs',import.meta.url)),'--phase','prepare','--target','both','--sha',sha],{cwd:dir,stdio:'pipe',env:{...process.env,GITHUB_TOKEN:'test',OFFLINE_PUBLISH_TOKEN:'test'}}),e=>e.status===1);
+ assert.throws(()=>execFileSync(process.execPath,['--import',pathToFileURL(mock).href,fileURLToPath(new URL('../release/execute.mjs',import.meta.url)),'--phase','prepare','--target','both','--sha',sha],{cwd:dir,stdio:'pipe',env:{...process.env,RELEASE_CONTROLLER_SHA:'',GITHUB_TOKEN:'test',OFFLINE_PUBLISH_TOKEN:'test'}}),e=>e.status===1);
  const result=JSON.parse(fs.readFileSync(path.join(ctx.root,'state.json')));assert.equal(result.complete,false);assert.match(result.fatal,/均未完成准备/);assert.ok(result.products.cloud.error);assert.ok(result.products.offline.error);
 });
 
@@ -102,4 +104,14 @@ test('cloud 重跑先恢复最新总记录，避免覆盖另一版已完成下�
  const restore=steps.findIndex(s=>s.run?.includes('restore.mjs')&&s.run.includes('--current'));
  const upload=steps.findIndex(s=>s.uses?.startsWith('actions/upload-pages-artifact'));
  assert.ok(restore>=0&&restore<upload);
+});
+
+
+test('Actions 二进制产物下载仍使用 JSON Accept，不与 Release 资产 API 混用',async t=>{
+ const {github}=await import('../release/github.mjs');const old=globalThis.fetch;t.after(()=>globalThis.fetch=old);
+ globalThis.fetch=async(url,options)=>{assert.equal(options.headers.Accept,'application/vnd.github+json');return new Response(Buffer.from('zip-bytes'));};
+ const bytes=await github('/repos/example/repo/actions/artifacts/1/zip',{binary:true,token:'fixture'});assert.equal(bytes.toString(),'zip-bytes');
+ const workflow=YAML.parse(fs.readFileSync('.github/workflows/release.yml','utf8'));
+ assert.equal(workflow.env.RELEASE_CONTROLLER_SHA,'${{ github.sha }}');
+ for(const job of Object.values(workflow.jobs))assert.ok(job.steps.some(s=>s.with?.path==='.release-controller'&&s.with.ref==='${{ github.sha }}'));
 });
