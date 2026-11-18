@@ -11,7 +11,7 @@ export function resumableRuns(runs, plan, currentId, attempt, includeCurrent=fal
 }
 export function resumableArtifacts(artifacts, currentRun, attempt, includeCurrent=false) {
  return artifacts.filter(a => !a.expired && /^release-state-(prepare|cloud|final)-\d+-\d+$/.test(a.name) &&
-  (!currentRun || includeCurrent || Number(a.name.split('-').at(-1))<attempt)).sort((a,b)=>b.id-a.id);
+  (!currentRun || includeCurrent || Number(a.name.split('-').at(-1))<attempt)).sort((a,b)=>{const parts=x=>{const t=x.name.split('-');return [Number(t.at(-1)),{prepare:1,cloud:2,final:3}[t[2]]];};const aa=parts(a),bb=parts(b);return bb[0]-aa[0]||bb[1]-aa[1];});
 }
 export async function restore(plan, includeCurrent=false) {
  const currentId=Number(process.env.GITHUB_RUN_ID),attempt=Number(process.env.GITHUB_RUN_ATTEMPT??1);

@@ -4,7 +4,7 @@ export async function request(url,{method='GET',headers={},body,timeout=30000,at
  let last;
  for(let attempt=1;attempt<=attempts;attempt++){
   try{const response=await fetcher(url,{method,headers,body,signal:AbortSignal.timeout(timeout)});
-   if(!response.ok){const e=Error('HTTP '+response.status+' '+new URL(url).origin+new URL(url).pathname);e.status=response.status;throw e;}
+   if(!response.ok){const e=Error('HTTP '+response.status+' '+new URL(url).origin+new URL(url).pathname);e.status=response.status;if(new URL(url).hostname==='api.github.com'){try{const detail=await response.json();if(typeof detail.message==='string')e.message+=': '+detail.message.slice(0,300);}catch{}}throw e;}
    const bytes=await response.arrayBuffer(); // 超时包括读取整个响应体
    if(binary)return Buffer.from(bytes);if(!bytes.byteLength)return null;return JSON.parse(new TextDecoder().decode(bytes));
   }catch(e){last=e;if(e.status && e.status!==429 && e.status<500)throw e;if(attempt<attempts)await sleep(1000);}

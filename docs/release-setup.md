@@ -24,3 +24,5 @@ Actions 内预演后的实际发布只对所选产品创建标签、部署和发
 报告保存在 Actions Summary 与 release-state-final 产物；Actions 记录默认保留30天。工作区备份与保护哈希只在所有者本机保存，不作为公开 Actions 产物上传。
 
 控制器与产品分别固定提交：工作流将输入 commit 检出到产品工作树，将该次工作流 github.sha 检出到独立控制器目录。恢复后仅新增控制器验证，不改已验证产品包；Actions Summary 同时列出两个提交。发布控制器修正不移动已有产品标签、不占新应用版本。
+
+已有标签经 SHA 核对后，创建 Release 只提交 tag_name，不再提交用于创建新标签的 target_commitish。该参数在已有标签时无效，并可能因旧产品与当前分支的 workflow 差异触发额外权限检查；不以增加主仓库令牌权限解决。依据：https://docs.github.com/en/rest/releases/releases#create-a-release 。恢复记录按 run attempt 与 prepare → cloud → final 顺序选择，不假定 GitHub 产物 ID 按时间递增。

@@ -12,7 +12,7 @@ import {resultStatus,report}from'../release/report.mjs';
 const products=JSON.parse(fs.readFileSync('release/products.json'));
 const plan=target=>({target,selected:selected(target),products,changelog:fs.readFileSync('docs/version-history.md','utf8'),commit:'a'.repeat(40),key:target+'-'+('a'.repeat(40))});
 function fixture(t,target){const ctx=context(plan(target),fs.mkdtempSync(path.join(os.tmpdir(),'release-test-')));for(const p of ctx.plan.selected){ctx.state.products[p]={};fs.mkdirSync(path.join(ctx.productDir(p),'packages'),{recursive:true});for(const k of ['source','web']){const file=path.join(ctx.productDir(p),'packages',zipName(ctx.plan,p,k));fs.writeFileSync(file,p+'-'+k);for(const stage of ['package','verify'])ctx.state.steps[p+'.'+stage+'.'+k]={status:'success',result:{sha256:fileHash(file)}};}}const oldFetch=globalThis.fetch,oldToken=process.env.GITHUB_TOKEN;process.env.GITHUB_TOKEN='isolated-test';t.after(()=>{globalThis.fetch=oldFetch;if(oldToken===undefined)delete process.env.GITHUB_TOKEN;else process.env.GITHUB_TOKEN=oldToken;});
- const state={tags:{},releases:{},bytes:{},writes:[],downloads:[],failUpload:null,failDownload:null,nextId:1};
+ const state={tags:{},releases:{},bytes:{},writes:[],releaseBodies:[],downloads:[],failUpload:null,failDownload:null,nextId:1};
  globalThis.fetch=async(url,options={})=>{const u=new URL(url),method=options.method??'GET',route=u.pathname;const body=options.body?JSON.parse(Buffer.isBuffer(options.body)?'null':options.body):null;
   if(method!=='GET')state.writes.push({route,method});
   const json=(data,status=200)=>new Response(JSON.stringify(data),{status});
@@ -20,7 +20,7 @@ function fixture(t,target){const ctx=context(plan(target),fs.mkdtempSync(path.jo
   if(route.includes('/git/ref/tags/')){const tag=route.split('/git/ref/tags/')[1];return state.tags[tag]?json({object:{type:'commit',sha:state.tags[tag]}}):json({},404);}
   if(route.endsWith('/git/refs')&&method==='POST'){state.tags[body.ref.slice(10)]=body.sha;return json({});}
   if(route.includes('/releases/tags/'))return state.releases[route.split('/releases/tags/')[1]]?json(state.releases[route.split('/releases/tags/')[1]]):json({},404);
-  if(route.endsWith('/releases')&&method==='POST'){const release={...body,id:state.nextId++,html_url:'https://release.test/'+body.tag_name,assets:[]};state.releases[body.tag_name]=release;return json(release);}
+  if(route.endsWith('/releases')&&method==='POST'){state.releaseBodies.push(body);const release={...body,id:state.nextId++,html_url:'https://release.test/'+body.tag_name,assets:[]};state.releases[body.tag_name]=release;return json(release);}
   if(u.hostname==='uploads.github.com'){const name=u.searchParams.get('name');if(name===state.failUpload)throw Error('模拟上传结果未完成');const id=Number(route.split('/').at(-2)),release=Object.values(state.releases).find(r=>r.id===id);state.bytes[name]=options.body;const asset={id:state.nextId++,name,size:options.body.length,digest:'sha256:'+hash(options.body),browser_download_url:'https://public.test/'+name};release.assets.push(asset);return json(asset);}
   if(route.match(/\/releases\/\d+$/)&&method==='PATCH'){const release=Object.values(state.releases).find(r=>r.id===Number(route.split('/').at(-1)));Object.assign(release,body);return json(release);}
   if(route.includes('/commits/'))return json({sha:ctx.plan.commit});
@@ -114,4 +114,14 @@ test('Actions 二进制产物下载仍使用 JSON Accept，不与 Release 资产
  const workflow=YAML.parse(fs.readFileSync('.github/workflows/release.yml','utf8'));
  assert.equal(workflow.env.RELEASE_CONTROLLER_SHA,'${{ github.sha }}');
  for(const job of Object.values(workflow.jobs))assert.ok(job.steps.some(s=>s.with?.path==='.release-controller'&&s.with.ref==='${{ github.sha }}'));
+});
+
+
+test('续跑按任务阶段排序，不把非递增 artifact ID 当时间顺序',()=>{
+ const actual=[{id:14411106082,name:'release-state-cloud-44266905633-1'},{id:14410746633,name:'release-state-final-44266905633-1'},{id:14410681546,name:'release-state-prepare-44266905633-1'}];
+ assert.equal(resumableArtifacts(actual,false,1)[0].name,'release-state-final-44266905633-1');
+});
+test('已有标签发Release只引用已核对标签，不要求额外 workflow 写权限',async t=>{
+ const {ctx,state}=fixture(t,'cloud');await ensureTag(ctx.plan,'cloud');await publishProduct(ctx,'cloud');
+ assert.equal(state.releaseBodies[0].target_commitish,undefined);assert.equal(state.releaseBodies[0].tag_name,products.cloud.tag);assert.equal(state.tags[products.cloud.tag],ctx.plan.commit);
 });

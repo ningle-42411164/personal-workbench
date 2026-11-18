@@ -1,8 +1,9 @@
 import fs from'node:fs';import path from'node:path';import{github}from'./github.mjs';import{request}from'./http.mjs';import{REPO,fileHash,hash,zipName,notes,assertPackages}from'./core.mjs';import{getRelease,validateRelease,tagCommit}from'./remote.mjs';
 export async function publishProduct(ctx,p){assertPackages(ctx,p);const {plan}=ctx,meta=plan.products[p];if(await tagCommit(meta.tag)!==plan.commit)throw Error('标签提交不符 '+p);
  let release=await getRelease(plan,p);
- if(!release)release=await github('/repos/'+REPO+'/releases',{method:'POST',body:{tag_name:meta.tag,target_commitish:plan.commit,name:meta.releaseTitle,body:notes(plan,p),draft:true,make_latest:p==='cloud'?'true':'false'}});
- validateRelease(release,plan,p);
+ if(!release)release=await github('/repos/'+REPO+'/releases',{method:'POST',body:{tag_name:meta.tag,name:meta.releaseTitle,body:notes(plan,p),draft:true,make_latest:p==='cloud'?'true':'false'}});
+ // 标签已存在且已核对；不传仅用于新建标签的 target_commitish，避免无关的 workflow 写权限检查。
+ if(await tagCommit(meta.tag)!==plan.commit)throw Error('标签提交冲突 '+p);validateRelease(release,plan,p);
  for(const kind of ['source','web']){const name=zipName(plan,p,kind),file=path.join(ctx.productDir(p),'packages',name),sha256=fileHash(file);let asset=release.assets.find(x=>x.name===name);
   if(!asset){if(!release.draft)throw Error('正式Release缺附件，禁止修改');asset=await github('https://uploads.github.com/repos/'+REPO+'/releases/'+release.id+'/assets?name='+encodeURIComponent(name),{method:'POST',raw:fs.readFileSync(file),timeout:90000});}
   const digest=asset.digest??'sha256:'+hash(await github('/repos/'+REPO+'/releases/assets/'+asset.id,{accept:'application/octet-stream',timeout:90000}));
