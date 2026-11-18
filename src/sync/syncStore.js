@@ -51,7 +51,7 @@ function isolateKnownTests(state) {
 
 // 事项、版本、待发送请求和拉取游标在同一个 IndexedDB 事务中提交。
 // 旧 LocalStorage v2 原文只保留为迁移前备份；导出仍使用原 v2 格式。
-export function createSyncStore({ indexedDB, storage, name = 'personal-workbench.local-sync.v1', uuid = () => crypto.randomUUID(), ownerPhone = false, now = () => new Date().toISOString() } = {}) {
+export function createSyncStore({ indexedDB, storage, name = 'personal-workbench.local-sync.v1', stateKey = 'workbench', uuid = () => crypto.randomUUID(), ownerPhone = false, now = () => new Date().toISOString() } = {}) {
   let opening;
   const listeners = new Set();
   const legacy = () => (storage ?? globalThis.localStorage).getItem(STORAGE_KEY);
@@ -71,7 +71,7 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
       const tx = db.transaction('state', 'readwrite');
       const store = tx.objectStore('state');
       let next, result, failure, changed;
-      store.get('workbench').onsuccess = event => {
+      store.get(stateKey).onsuccess = event => {
         try {
           next = event.target.result;
           const before = JSON.stringify(next);
@@ -93,7 +93,7 @@ export function createSyncStore({ indexedDB, storage, name = 'personal-workbench
           validateWorkbenchData(next.data);
           if (!equal(previous, next.data) || previousAchievements !== JSON.stringify(next.achievements)) next.revision++;
           changed = before !== JSON.stringify(next);
-          store.put(next, 'workbench');
+          store.put(next, stateKey);
         } catch (error) { failure = error; tx.abort(); }
       };
       tx.oncomplete = () => resolve({ state: next, result, changed });

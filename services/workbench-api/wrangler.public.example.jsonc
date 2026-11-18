@@ -1,0 +1,17 @@
+{
+  "name": "REPLACE-WITH-PUBLIC-TEST-WORKER",
+  "main": "src/public/index.js",
+  "compatibility_date": "2026-04-30",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "vars": {
+    "PUBLIC_DEPLOYMENT": "workbench-public-v3",
+    "PUBLIC_ENV": "development",
+    "PUBLIC_BASE_URL": "http://127.0.0.1:8788",
+    "PUBLIC_FRONTEND_ORIGIN": "http://127.0.0.1:5175",
+    "PUBLIC_CLIENT_ORIGINS": "[]",
+    "CLERK_ISSUER": "https://YOUR-PUBLIC-DEV-INSTANCE.clerk.accounts.dev",
+    "CLERK_PUBLISHABLE_KEY": "YOUR-PUBLIC-CLERK-PUBLISHABLE-KEY"
+  },
+  "d1_databases": [{"binding":"PUBLIC_DB","database_name":"YOUR-ISOLATED-PUBLIC-TEST-DATABASE","database_id":"YOUR-NEW-PUBLIC-DATABASE-ID","migrations_dir":"migrations-public"}],
+  "kv_namespaces": [{"binding":"PUBLIC_OAUTH_KV","id":"YOUR-NEW-PUBLIC-KV-ID"}]
+}

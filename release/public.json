@@ -1,0 +1,7 @@
+{
+  "version": "3.0.0",
+  "label": "公开版（开发中）",
+  "base": "/personal-workbench-public/",
+  "status": "development",
+  "release": false
+}

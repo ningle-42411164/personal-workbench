@@ -10,9 +10,13 @@
     "test": "node --test tests/*.test.js",
     "build:offline": "node scripts/build.mjs offline",
     "build:all": "npm run build:cloud && npm run build:offline",
-    "build:cloud": "node scripts/build.mjs cloud"
+    "build:cloud": "node scripts/build.mjs cloud",
+    "dev:public": "vite --mode public --host 127.0.0.1 --port 5175",
+    "build:public": "node scripts/build.mjs public",
+    "preview:public": "vite preview --mode public --outDir dist/public --host 127.0.0.1 --port 4175"
   },
   "dependencies": {
+    "@clerk/clerk-js": "6.44.0",
     "fractional-indexing": "3.2.0",
     "oauth4webapi": "3.8.8",
     "sortablejs": "1.15.6",

@@ -7,3 +7,10 @@ release-assets/
 *.log
 
 .release/
+
+# Public development credentials and local-only service bindings
+.env.public.local
+services/workbench-api/.dev.vars*
+services/workbench-api/wrangler.public.local.jsonc
+
+.public-test/

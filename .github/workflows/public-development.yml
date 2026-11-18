@@ -1,0 +1,34 @@
+name: Check public workbench development
+on:
+  push:
+    branches: ['public/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: public-checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.21.0'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts
+        working-directory: services/workbench-api
+      - run: npm test
+      - run: npm test
+        working-directory: services/workbench-api
+      - run: npm run check
+        working-directory: services/workbench-api
+      - run: npm run check:public
+        working-directory: services/workbench-api
+      - run: npm run build:all
+      - run: npm run build:public
+      - run: node scripts/check-public-build.mjs
+      # 开发分支只检查：不授予发布权限、不创建标签或部署站点。

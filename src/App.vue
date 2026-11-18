@@ -6,7 +6,7 @@ import CelebrationEffects from './components/CelebrationEffects.vue';
 import { emptyAchievements, parseBackup, exportBackup } from './data/achievements.js';
 import ReminderBanner from './components/ReminderBanner.vue';
 import {setReminderDate,createReminderQueue} from './data/reminders.js';
-import {PRODUCT,OFFLINE} from './product.js';
+import {PRODUCT,OFFLINE,PUBLIC} from './product.js';
 import QuickTagPicker from './components/QuickTagPicker.vue';
 import { sortedCompleted, completedBatchLimit, toggleFavorite } from './data/completedItems.js';
 import TagRuleSettings from './components/TagRuleSettings.vue';
@@ -27,6 +27,7 @@ import { togglePin, compareRows, frontRank, moveRank, returnTodo } from './data/
 import ProjectDialog from './components/ProjectDialog.vue';
 import ProjectCreate from './components/ProjectCreate.vue';
 import OrdinaryItem from './components/OrdinaryItem.vue';
+import PublicAccountPanel from './public/PublicAccountPanel.vue';
 import CloudConnection from './components/CloudConnection.vue';
 import SyncSettings from './components/SyncSettings.vue';
 import { useSyncWorkbench } from './sync/useSyncWorkbench.js';
@@ -92,7 +93,7 @@ const quickType = ref('default');
 const quickTags = ref([]);
 const tagPickerOpen = ref(false), tagRulesOpen = ref(false), removedQuickTags = ref([]);
 const tagRules = ref([]), tagRulesError = ref('');
-try { tagRules.value = readTagRules(); } catch { tagRulesError.value = '本机标签规则读取失败，原设置未覆盖。'; }
+try { tagRules.value = readTagRules(PUBLIC ? sync.public.preferenceStorage() : undefined); } catch { tagRulesError.value = '本机标签规则读取失败，原设置未覆盖。'; }
 const selectedQuickTags = computed(() => normalizeUserTags([...quickTags.value,
   ...matchedTags(title.value, tagRules.value, availableProjectTags.value, removedQuickTags.value)]));
 function selectQuickTag(tag) {
@@ -103,7 +104,7 @@ function removeQuickTag(tag) {
   quickTags.value = quickTags.value.filter(value => value !== tag);
   removedQuickTags.value = [...new Set([...removedQuickTags.value, tag])];
 }
-function saveTagRules(rules) { writeTagRules(rules); tagRules.value = rules; tagRulesError.value = ''; }
+function saveTagRules(rules) { writeTagRules(rules, PUBLIC ? sync.public.preferenceStorage() : undefined); tagRules.value = rules; tagRulesError.value = ''; }
 const quickTargetDate = ref('');
 const quickReminderDate = ref('');
 const quickTypes = [
@@ -210,9 +211,10 @@ const { offlineReady, needRefresh, updateServiceWorker } = useRegisterSW();
 // 浏览器保存的数据需要先校验，读取失败时不能悄悄覆盖旧数据。
 const storageReadable = ref(false);
 const localSaving = ref(false);
-const canEditLocal = computed(() => storageReadable.value && !localSaving.value);
+const canEditLocal = computed(() => storageReadable.value && !localSaving.value && (!PUBLIC || !cloudState.value.switching));
 let localRevision = -1;
-const reminderQueue=createReminderQueue({storage:localStorage}), reminderBanner=ref(null);
+let reminderQueue=createReminderQueue({storage:PUBLIC ? sync.public.preferenceStorage() : localStorage});
+const reminderBanner=ref(null);
 let reminderCheck;
 function showReminders(){
   if(document.visibilityState==='hidden' || document.documentElement.classList.contains('splash-pending'))return;
@@ -235,14 +237,26 @@ watch(personalItems,()=>{
   if(storageReadable.value && !localSaving.value)void checkReminders();
 });
 try {
-  workbenchData.value = readWorkbenchData();//先显示旧 v2 备份；事务存储就绪后才开放编辑。
+  if (!PUBLIC) workbenchData.value = readWorkbenchData();//先显示旧 v2 备份；事务存储就绪后才开放编辑。
 } catch (error) {
   storageReadable.value = false;
   message.value = error.message;
 }
+let displayedAccountKey;
 watch(syncSnapshot, next => {
+  if(PUBLIC && next && next.publicAccountKey!==displayedAccountKey){
+    displayedAccountKey=next.publicAccountKey;localRevision=-1;
+    // 账号边界不是普通云端更新。先由切号保护拒绝草稿，再清除旧账号的浏览状态。
+    selectedProjectId.value=null;projectAtOpen.value=null;selectedNoteId.value=null;selectedDetailId.value=null;selectedTodoId.value=null;
+    editingOrdinary.value={};ordinaryEditors.clear();sorting.value=null;highlighted.value=null;
+    achievementHallOpen.value=false;selectedAchievement.value=null;searchMessage.value='';message.value='';
+    tagPickerOpen.value=false;removedQuickTags.value=[];showCompleted.value=false;completedLimit.value=10;
+    reminderQueue=createReminderQueue({storage:sync.public.preferenceStorage()});reminderBanner.value=null;
+    try{tagRules.value=readTagRules(sync.public.preferenceStorage());tagRulesError.value='';}catch{tagRules.value=[];tagRulesError.value='此账号的本机标签规则读取失败。';}
+  }
   if (next && next.revision !== localRevision) { workbenchData.value = next.data; localRevision = next.revision; }
 });
+if(PUBLIC)sync.public.setChangeGuard(()=>!localSaving.value&&!Object.keys(editingOrdinary.value).length&&!selectedProjectId.value&&!selectedNoteId.value&&!showRoutineForm.value&&!showImportantForm.value&&!addingCategory.value&&!importOpen.value&&!tagRulesOpen.value&&!tagPickerOpen.value&&!title.value.trim()&&!categoryTitle.value.trim()&&!routineTitle.value.trim()&&!importantTitle.value.trim()&&!quickTags.value.length&&!quickTargetDate.value&&!quickReminderDate.value);
 void sync.initialize().then(next => {
   workbenchData.value = next.data; localRevision = next.revision; storageReadable.value = true;
   void checkReminders();
@@ -676,7 +690,7 @@ async function confirmImport() {
 
 <template>
   <LaunchSplash v-if="showSplash" @finished="showReminders" />
-  <main>
+  <main :key="PUBLIC ? syncSnapshot?.publicAccountKey : undefined">
     <ReminderBanner :item="reminderBanner" :today="today" @acknowledge="acknowledgeReminder" />
     <SuccessMessages ref="successMessages" @locate="locateCompleted" />
     <CelebrationEffects ref="celebrationEffects" @open="openAchievement" />
@@ -849,11 +863,13 @@ async function confirmImport() {
       </div>
       <p v-if="themeError" class="error" role="alert">{{ themeError }}</p>
       <p v-if="splashPreferenceError" class="error" role="alert">{{ splashPreferenceError }}</p>
-      <div v-if="!OFFLINE" class="footer-row">
+      <div v-if="!OFFLINE && !PUBLIC" class="footer-row">
         <div class="footer-label">云端连接<QuickHelp label="云端连接说明">云端仅供所有者连接。连接后，支持的事项会自动同步，日常无需手动上传；本机功能无需登录。</QuickHelp></div>
         <div class="footer-actions"><button type="button" aria-haspopup="dialog" @click="cloudSettingsOpen = true">设置</button></div>
       </div>
-      <ProjectCard v-if="!OFFLINE" title="云端连接" :open="cloudSettingsOpen" :request-close="() => cloudSettingsOpen = false">
+      <div v-if="PUBLIC" class="footer-row"><span>账号与云服务</span><div class="footer-actions"><button type="button" aria-haspopup="dialog" @click="cloudSettingsOpen=true">{{ cloudState.activeAccount?'设置':'开启云同步' }}</button></div></div>
+      <PublicAccountPanel v-if="PUBLIC" :open="cloudSettingsOpen" :state="cloudState" :snapshot="syncSnapshot" :status="syncStatus" :controller="sync.public" :request-close="()=>cloudSettingsOpen=false" />
+      <ProjectCard v-if="!OFFLINE && !PUBLIC" title="云端连接" :open="cloudSettingsOpen" :request-close="() => cloudSettingsOpen = false">
         <CloudConnection v-if="!OFFLINE" :offline-summary="repeatedOffline" :state="cloudState" @login="cloud.login()" @enable-write="cloud.login({ write: true })" @resume="cloud.resumeConnection()" @logout="cloud.logout" />
         <SyncSettings v-if="!OFFLINE" :suppress-status-message="repeatedOffline" :snapshot="syncSnapshot" :status="syncStatus" :connection="cloudState" :owner-phone="sync.ownerPhone" @enabled="sync.enabled" @resolve="sync.resolve" />
       </ProjectCard>

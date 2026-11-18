@@ -6,9 +6,12 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "check": "node scripts/check-build.mjs",
+    "check:public": "node scripts/check-public-build.mjs",
+    "dev:public": "wrangler dev --local --config wrangler.public.local.jsonc --port 8788",
     "dev": "wrangler dev --local"
   },
   "dependencies": {
+    "@clerk/backend": "3.30.0",
     "@cloudflare/workers-oauth-provider": "1.2.4",
     "@modelcontextprotocol/sdk": "1.32.2",
     "zod": "3.25.76"
