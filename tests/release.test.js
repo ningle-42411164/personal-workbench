@@ -95,3 +95,11 @@ test('发布与回滚工作流产物引用来自已完成上游，没有引用�
   for(const [name,job]of Object.entries(workflow.jobs))assert.equal(JSON.stringify(job).includes('needs.'+name+'.'),false,file+'/'+name);
  }
 });
+
+
+test('cloud 重跑先恢复最新总记录，避免覆盖另一版已完成下载',()=>{
+ const w=YAML.parse(fs.readFileSync('.github/workflows/release.yml','utf8')),steps=w.jobs.cloud.steps;
+ const restore=steps.findIndex(s=>s.run?.includes('restore.mjs')&&s.run.includes('--current'));
+ const upload=steps.findIndex(s=>s.uses?.startsWith('actions/upload-pages-artifact'));
+ assert.ok(restore>=0&&restore<upload);
+});

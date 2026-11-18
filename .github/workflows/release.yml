@@ -84,6 +84,10 @@ jobs:
         with:
           name: ${{ needs.prepare.outputs.artifact }}
           path: .release/
+      - name: Preserve completed work from previous attempt
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node release/restore.mjs --target "$RELEASE_TARGET" --sha "$RELEASE_SHA" --current
       - uses: actions/upload-pages-artifact@v5
         id: pages
         with:
