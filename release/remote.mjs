@@ -7,5 +7,13 @@ export async function verifySite(plan,product){const meta=plan.products[product]
 export async function waitSite(plan,product){return waitFor(async()=>{try{return await verifySite(plan,product)}catch(e){if(e.status===401||e.status===403)throw e;return false;}},{label:product+'线上版本'});}
 export async function snapshotProduct(product){const info=await liveInfo(product),repo=product==='cloud'?REPO:OFFLINE_REPO,tag=info.tag??(product==='cloud'?'v':'offline-v')+info.version;const release=await github('/repos/'+REPO+'/releases/tags/'+tag);const deployment=product==='offline'?(await github('/repos/'+repo+'/git/ref/heads/gh-pages')).object.sha:(await github('/repos/'+repo+'/deployments?environment=github-pages&per_page=1')).map(x=>({id:x.id,sha:x.sha,updated_at:x.updated_at}));return {info,deployment,release:{id:release.id,tag:release.tag_name,name:release.name,body:release.body,updated_at:release.updated_at,assets:release.assets.map(x=>({id:x.id,name:x.name,size:x.size,digest:x.digest,updated_at:x.updated_at}))}};}
 export async function preserveOthers(ctx,after=false){for(const product of ['cloud','offline'].filter(p=>!ctx.plan.selected.includes(p))){const actual=await snapshotProduct(product);if(!after){ctx.state.unselected??={};if(!ctx.state.unselected[product])ctx.state.unselected[product]=actual;else if(JSON.stringify(ctx.state.unselected[product])!==JSON.stringify(actual))throw Error('未选产品在续跑前发生变化 '+product);}else{if(JSON.stringify(ctx.state.unselected?.[product])!==JSON.stringify(actual))throw Error('未选产品被修改 '+product);ctx.state.unselectedVerified??={};ctx.state.unselectedVerified[product]={unchanged:true,checkedAt:new Date().toISOString()};}ctx.save();}}
-export async function getRelease(plan,p){return optional('/repos/'+REPO+'/releases/tags/'+plan.products[p].tag);}
+export async function getRelease(plan,p){
+ const tag=plan.products[p].tag,published=await optional('/repos/'+REPO+'/releases/tags/'+tag);if(published)return published;
+ // 按标签接口只返回正式 Release；草稿须从有写权限的列表中查询。
+ const found=[];for(let page=1;page<=5;page++){
+  const list=await github('/repos/'+REPO+'/releases?per_page=100&page='+page);found.push(...list.filter(r=>r.tag_name===tag));
+  if(list.length<100){if(found.length>1)throw Error('同标签存在多个草稿，停止避免重复 '+tag);return found[0]??null;}
+ }
+ throw Error('Release 列表超出限定查询范围，不能安全判定草稿是否存在');
+}
 export function validateRelease(release,plan,p){if(!release||release.tag_name!==plan.products[p].tag||release.name!==plan.products[p].releaseTitle||release.body!==notes(plan,p))throw Error('Release 名称/标签/中文说明冲突 '+p);const expected=['source','web'].map(k=>zipName(plan,p,k)).sort();const names=release.assets.map(a=>a.name);if(names.some(n=>!expected.includes(n))||new Set(names).size!==names.length||!release.draft&&JSON.stringify(names.sort())!==JSON.stringify(expected))throw Error('正式附件清单不一致 '+p);}

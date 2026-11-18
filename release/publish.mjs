@@ -10,8 +10,10 @@ export async function publishProduct(ctx,p){assertPackages(ctx,p);const {plan}=c
   if(digest!=='sha256:'+sha256||asset.size!==fs.statSync(file).size)throw Error('远程同名附件内容冲突，禁止覆盖 '+name);
   ctx.state.products[p].assets??={};ctx.state.products[p].assets[kind]={id:asset.id,name,url:asset.browser_download_url,sha256,size:asset.size};ctx.save();
  }
- release=await getRelease(plan,p);validateRelease(release,plan,p);if(release.assets.length!==2)throw Error('附件尚未齐全');
+ release=await github('/repos/'+REPO+'/releases/'+release.id);validateRelease(release,plan,p);if(release.assets.length!==2)throw Error('附件尚未齐全');
  if(release.draft)release=await github('/repos/'+REPO+'/releases/'+release.id,{method:'PATCH',body:{draft:false,make_latest:p==='cloud'?'true':'false'}});
+ validateRelease(release,plan,p);if(await tagCommit(meta.tag)!==plan.commit)throw Error('发布后标签提交冲突 '+p);
+ for(const kind of ['source','web']){const saved=ctx.state.products[p].assets[kind],actual=release.assets.find(a=>a.id===saved.id);if(!actual)throw Error('发布后附件身份变化');saved.url=actual.browser_download_url;}ctx.save();
  return {id:release.id,url:release.html_url,tag:meta.tag,published:true};
 }
 export async function publishedMatches(ctx,p){assertPackages(ctx,p);if(await tagCommit(ctx.plan.products[p].tag)!==ctx.plan.commit)throw Error('标签提交冲突 '+p);const release=await getRelease(ctx.plan,p);validateRelease(release,ctx.plan,p);if(release.draft)return false;for(const kind of ['source','web']){const expected=ctx.state.products[p].assets?.[kind],actual=release.assets.find(a=>a.name===zipName(ctx.plan,p,kind));if(!expected||!actual||actual.id!==expected.id||actual.size!==expected.size)return false;const digest=actual.digest??'sha256:'+hash(await github('/repos/'+REPO+'/releases/assets/'+actual.id,{accept:'application/octet-stream'}));if(digest!=='sha256:'+expected.sha256)throw Error('已发布附件被修改');}return true;}

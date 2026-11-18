@@ -19,7 +19,9 @@ function fixture(t,target){const ctx=context(plan(target),fs.mkdtempSync(path.jo
   if(u.hostname==='public.test'){assert.equal(options.headers?.Authorization,undefined);state.downloads.push(route);if(route===state.failDownload)throw Error('模拟下载中断');return new Response(state.bytes[route.slice(1)]);}
   if(route.includes('/git/ref/tags/')){const tag=route.split('/git/ref/tags/')[1];return state.tags[tag]?json({object:{type:'commit',sha:state.tags[tag]}}):json({},404);}
   if(route.endsWith('/git/refs')&&method==='POST'){state.tags[body.ref.slice(10)]=body.sha;return json({});}
-  if(route.includes('/releases/tags/'))return state.releases[route.split('/releases/tags/')[1]]?json(state.releases[route.split('/releases/tags/')[1]]):json({},404);
+  if(route.includes('/releases/tags/')){const r=state.releases[route.split('/releases/tags/')[1]];return r&&!r.draft?json(r):json({},404);}
+  if(route.endsWith('/releases')&&method==='GET')return json(Object.values(state.releases));
+  if(route.match(/\/releases\/\d+$/)&&method==='GET')return json(Object.values(state.releases).find(r=>r.id===Number(route.split('/').at(-1))));
   if(route.endsWith('/releases')&&method==='POST'){state.releaseBodies.push(body);const release={...body,id:state.nextId++,html_url:'https://release.test/'+body.tag_name,assets:[]};state.releases[body.tag_name]=release;return json(release);}
   if(u.hostname==='uploads.github.com'){const name=u.searchParams.get('name');if(name===state.failUpload)throw Error('模拟上传结果未完成');const id=Number(route.split('/').at(-2)),release=Object.values(state.releases).find(r=>r.id===id);state.bytes[name]=options.body;const asset={id:state.nextId++,name,size:options.body.length,digest:'sha256:'+hash(options.body),browser_download_url:'https://public.test/'+name};release.assets.push(asset);return json(asset);}
   if(route.match(/\/releases\/\d+$/)&&method==='PATCH'){const release=Object.values(state.releases).find(r=>r.id===Number(route.split('/').at(-1)));Object.assign(release,body);return json(release);}
@@ -124,4 +126,10 @@ test('续跑按任务阶段排序，不把非递增 artifact ID 当时间顺序'
 test('已有标签发Release只引用已核对标签，不要求额外 workflow 写权限',async t=>{
  const {ctx,state}=fixture(t,'cloud');await ensureTag(ctx.plan,'cloud');await publishProduct(ctx,'cloud');
  assert.equal(state.releaseBodies[0].target_commitish,undefined);assert.equal(state.releaseBodies[0].tag_name,products.cloud.tag);assert.equal(state.tags[products.cloud.tag],ctx.plan.commit);
+});
+
+
+test('草稿按标签返回404时仍复用原ID与附件，不新建或重新上传',async t=>{
+ const {ctx,state}=fixture(t,'cloud');await ensureTag(ctx.plan,'cloud');state.failUpload=zipName(ctx.plan,'cloud','web');await assert.rejects(publishProduct(ctx,'cloud'));const old=state.releases[products.cloud.tag],sourceId=old.assets[0].id;
+ state.failUpload=null;await publishProduct(ctx,'cloud');assert.equal(state.releaseBodies.length,1);assert.equal(state.releases[products.cloud.tag].id,old.id);assert.equal(old.assets[0].id,sourceId);assert.equal(old.draft,false);
 });
