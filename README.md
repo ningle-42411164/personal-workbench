@@ -6,8 +6,8 @@
 
 | 产品 | 版本 | 入口 | 云功能 |
 |---|---|---|---|
-| 含云版 | 2.1.0 | https://ningle-42411164.github.io/personal-workbench/ | 既有所有者授权、同步及 MCP |
-| 独立脱机版 | 1.1.0 | https://ningle-42411164.github.io/personal-workbench-offline/ | 不含云授权、令牌恢复或业务云请求 |
+| 含云版 | 2.1.1 | https://ningle-42411164.github.io/personal-workbench/ | 既有所有者授权、同步及 MCP |
+| 独立脱机版 | 1.1.1 | https://ningle-42411164.github.io/personal-workbench-offline/ | 不含云授权、令牌恢复或业务云请求 |
 
 正式发布状态与对应提交以各产品 Release 为准。两版共享主要业务源码；脱机站点仓库只接收静态发行物。
 
@@ -17,12 +17,12 @@
 
 [查看中文更新日志与历史版本](docs/version-history.md)：按版本查看新增功能、修复内容和对应提交，包含旧日期编号与早期演进记录。
 
-- [含云版 v2.1.0 Release](https://github.com/ningle-42411164/personal-workbench/releases/tag/v2.1.0)
-  - [专用源码](https://github.com/ningle-42411164/personal-workbench/releases/download/v2.1.0/personal-workbench-v2.1.0-source.zip)
-  - [静态网页包](https://github.com/ningle-42411164/personal-workbench/releases/download/v2.1.0/personal-workbench-v2.1.0-web.zip)
-- [脱机版 v1.1.0 Release](https://github.com/ningle-42411164/personal-workbench/releases/tag/offline-v1.1.0)
-  - [专用源码](https://github.com/ningle-42411164/personal-workbench/releases/download/offline-v1.1.0/personal-workbench-offline-v1.1.0-source.zip)
-  - [静态网页包](https://github.com/ningle-42411164/personal-workbench/releases/download/offline-v1.1.0/personal-workbench-offline-v1.1.0-web.zip)
+- [含云版 v2.1.1 Release](https://github.com/ningle-42411164/personal-workbench/releases/tag/v2.1.1)
+  - [专用源码](https://github.com/ningle-42411164/personal-workbench/releases/download/v2.1.1/personal-workbench-v2.1.1-source.zip)
+  - [静态网页包](https://github.com/ningle-42411164/personal-workbench/releases/download/v2.1.1/personal-workbench-v2.1.1-web.zip)
+- [脱机版 v1.1.1 Release](https://github.com/ningle-42411164/personal-workbench/releases/tag/offline-v1.1.1)
+  - [专用源码](https://github.com/ningle-42411164/personal-workbench/releases/download/offline-v1.1.1/personal-workbench-offline-v1.1.1-source.zip)
+  - [静态网页包](https://github.com/ningle-42411164/personal-workbench/releases/download/offline-v1.1.1/personal-workbench-offline-v1.1.1-web.zip)
 
 不要把单一 Latest 当作两产品共同最新版。GitHub 自动生成的 Source code 是通用仓库归档；脱机专用源码附件默认构建脱机版。
 
@@ -50,11 +50,24 @@
 
 ## 验证与发布
 
-前端 npm test；服务端目录 npm ci --ignore-scripts、npm test、npm run check。npm run build:all 构建两版。
+Codex 在提交前准备 release/products.json 和 docs/version-history.md 的中文日志。发布命令不猜测或自动增加版本；Release 直接复用日志正文。
 
-统一双版发布入口为 `node release/run.mjs`：测试、构建、包校验、标签与 Push、两站部署、中文 Release 发布；版本及本批标题从 `release/products.json` 读取，正文来自 `release/cloud.md` 与 `release/offline.md`。重试复用已核对的附件，不移动旧标签或替换已发布包。
+统一入口：
 
-发布准备应在无无关修改的独立工作树进行：确定并提交代码，运行 node release/package.mjs，从实际 ZIP 解压安装和构建，核对 SOURCE.json / release-info.json 的提交及版本，再绑定两标签。node release/publish.mjs 使用 GitHub 授权上传草稿并发布；已有标签不得移动，已有同名附件必须逐字节一致，已发布附件不得覆盖。普通提交不会自动升号或创建 Release。Pages 工作流同时构建两版；脱机产物同步到独立静态站点仓库，不能删除另一版站点。
+- node release/run.mjs --target cloud：仅含云版。
+- node release/run.mjs --target offline：仅脱机版。
+- node release/run.mjs --target both：两版分别发布并汇总。
+- 追加 --dry-run：只展示计划，无远程写入。
+- 追加 --sha 完整SHA：固定来源；默认当前提交。
+- 追加 --no-wait：拿到任务链接即返回，电脑关闭不影响 Actions。
+
+普通 Push 只运行检查，不部署、不建标签或 Release。正式发布由 Actions 接手：固定提交测试 → 所选产品构建 → 逐包验证 → 标签 → 所选站点 → Release → 无登录公开下载校验 → 中文报告。网页包与站点复用同一正式构建；源码包另外解压并默认构建验证。网页包不是安装包，部署路径见包内 DEPLOY.txt。
+
+失败后再次执行同一 target/SHA 命令。流程会检查同一提交、产品、Node 版本及平台的 Actions 保存产物与实际远程状态，只补未完成步骤。ZIP 使用临时文件后原子改名；每份 ZIP 单独记录 SHA256，不使用 Actions 外层产物摘要代替它。已发布且下载失败时报告“已发布，下载核验未完成”，不删除 Release、不回滚正常站点。记录与包保留 30 天；过期或输入改变时不能保证跳过此前本机步骤，旧标签与附件仍禁止覆盖。
+
+跨仓库权限只给脱机部署任务：一次性配置见 [发布授权说明](docs/release-setup.md)。不把本机 Git 凭据复制到 Actions。主仓库使用临时 GITHUB_TOKEN；独立脱机仓库需要单独的最小写入授权。
+
+Actions Summary 和 release-state-final 产物包含中文结果、各步骤、部署和公开下载证据。未发生真实单版发布前，只把单版路径称为隔离验证。站点回滚可在 GitHub Actions 的 Rollback workbench site 中指定产品和旧标签，使用旧网页包；不需要反复 Push。
 
 回滚代码与恢复数据是两回事：使用反向提交或重新部署此前验证的静态包，保留现有字段兼容层和数据库；不要清空浏览器存储代替回滚。数据恢复仅在使用者明确选择备份并确认覆盖后执行。
 

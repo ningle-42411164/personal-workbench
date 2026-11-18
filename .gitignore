@@ -5,3 +5,5 @@ dist/
 
 release-assets/
 *.log
+
+.release/

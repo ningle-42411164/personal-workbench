@@ -1,0 +1,147 @@
+name: Release workbench
+run-name: Release ${{ inputs.target }}-${{ inputs.commit }}
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        type: choice
+        options: [cloud, offline, both]
+        required: true
+      commit:
+        description: Full committed source SHA
+        required: true
+        type: string
+concurrency:
+  group: workbench-formal-release
+  cancel-in-progress: false
+permissions:
+  contents: read
+  actions: read
+env:
+  RELEASE_TARGET: ${{ inputs.target }}
+  RELEASE_SHA: ${{ inputs.commit }}
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+      pages: read
+      deployments: read
+    outputs:
+      artifact: release-state-prepare-${{ github.run_id }}-${{ github.run_attempt }}
+      cloud_deploy: ${{ steps.prepare.outputs.cloud_deploy }}
+      ready: ${{ steps.prepare.outputs.ready }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.21.0'
+      - name: Restore matching release record
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node release/restore.mjs --target "$RELEASE_TARGET" --sha "$RELEASE_SHA"
+      - name: Validate, test, build and package selected products
+        id: prepare
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          OFFLINE_PUBLISH_TOKEN: ${{ secrets.OFFLINE_PUBLISH_TOKEN }}
+        run: node release/execute.mjs --phase prepare --target "$RELEASE_TARGET" --sha "$RELEASE_SHA"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-state-prepare-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .release/
+          include-hidden-files: true
+          retention-days: 30
+  cloud:
+    needs: prepare
+    if: needs.prepare.outputs.cloud_deploy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      artifact: release-state-cloud-${{ github.run_id }}-${{ github.run_attempt }}
+    environment: github-pages
+    permissions:
+      contents: read
+      actions: read
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.21.0'
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare.outputs.artifact }}
+          path: .release/
+      - uses: actions/upload-pages-artifact@v5
+        id: pages
+        with:
+          name: selected-cloud-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .release/${{ inputs.target }}-${{ inputs.commit }}/cloud/site
+      - name: Deploy verified cloud artifact
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PAGES_ARTIFACT_ID: ${{ steps.pages.outputs.artifact_id }}
+        run: node release/execute.mjs --phase cloud --target "$RELEASE_TARGET" --sha "$RELEASE_SHA"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-state-cloud-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .release/
+          include-hidden-files: true
+          retention-days: 30
+  finish:
+    needs: [prepare, cloud]
+    if: always() && needs.prepare.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+      pages: read
+      deployments: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.21.0'
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare.outputs.artifact }}
+          path: .release/
+      - uses: actions/download-artifact@v8
+        if: needs.prepare.outputs.cloud_deploy == 'true'
+        continue-on-error: true
+        with:
+          name: ${{ needs.cloud.outputs.artifact }}
+          path: .release/
+      - name: Reconcile latest checkpoint including previous failed attempt
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node release/restore.mjs --target "$RELEASE_TARGET" --sha "$RELEASE_SHA" --current
+      - name: Deploy offline, publish and verify public downloads
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          OFFLINE_PUBLISH_TOKEN: ${{ secrets.OFFLINE_PUBLISH_TOKEN }}
+        run: node release/execute.mjs --phase finish --target "$RELEASE_TARGET" --sha "$RELEASE_SHA"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-state-final-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .release/
+          include-hidden-files: true
+          retention-days: 30

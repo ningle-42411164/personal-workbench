@@ -1,0 +1,138 @@
+name: Rollback workbench site
+run-name: Rollback ${{ inputs.target }} ${{ inputs.tag }}
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        type: choice
+        options: [cloud, offline]
+        required: true
+      tag:
+        description: Existing published product tag
+        required: true
+        type: string
+concurrency:
+  group: workbench-formal-release
+  cancel-in-progress: false
+permissions:
+  contents: read
+  actions: read
+env:
+  RELEASE_TARGET: ${{ inputs.target }}
+  RELEASE_TAG: ${{ inputs.tag }}
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      pages: read
+      deployments: read
+    outputs:
+      artifact: release-state-prepare-${{ github.run_id }}-${{ github.run_attempt }}
+      key: ${{ steps.prepare.outputs.key }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.21.0'
+      - name: Verify published rollback package
+        id: prepare
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          OFFLINE_PUBLISH_TOKEN: ${{ secrets.OFFLINE_PUBLISH_TOKEN }}
+        run: node release/rollback.mjs --phase prepare --target "$RELEASE_TARGET" --tag "$RELEASE_TAG"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-state-prepare-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .release/
+          include-hidden-files: true
+          retention-days: 30
+  cloud:
+    needs: prepare
+    if: inputs.target == 'cloud'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      artifact: release-state-cloud-${{ github.run_id }}-${{ github.run_attempt }}
+    environment: github-pages
+    permissions:
+      contents: read
+      actions: read
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.21.0'
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare.outputs.artifact }}
+          path: .release/
+      - uses: actions/upload-pages-artifact@v5
+        id: pages
+        with:
+          name: selected-cloud-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .release/${{ needs.prepare.outputs.key }}/cloud/site
+      - name: Deploy verified cloud artifact
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PAGES_ARTIFACT_ID: ${{ steps.pages.outputs.artifact_id }}
+        run: node release/rollback.mjs --phase cloud --target "$RELEASE_TARGET" --tag "$RELEASE_TAG"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-state-cloud-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .release/
+          include-hidden-files: true
+          retention-days: 30
+  finish:
+    needs: [prepare, cloud]
+    if: always() && needs.prepare.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      pages: read
+      deployments: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.21.0'
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare.outputs.artifact }}
+          path: .release/
+      - uses: actions/download-artifact@v8
+        if: inputs.target == 'cloud'
+        continue-on-error: true
+        with:
+          name: ${{ needs.cloud.outputs.artifact }}
+          path: .release/
+      - name: Verify selected rollback and unchanged other product
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          OFFLINE_PUBLISH_TOKEN: ${{ secrets.OFFLINE_PUBLISH_TOKEN }}
+        run: node release/rollback.mjs --phase finish --target "$RELEASE_TARGET" --tag "$RELEASE_TAG"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-state-final-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .release/
+          include-hidden-files: true
+          retention-days: 30

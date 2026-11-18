@@ -1,24 +1,25 @@
-import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import {execFileSync} from 'node:child_process';
-const root=process.cwd(),products=JSON.parse(fs.readFileSync('release/products.json')),commit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
-const output=path.resolve(process.argv[2]||'release-assets');fs.mkdirSync(output,{recursive:true});
-const run=(c,args,cwd)=>execFileSync(c,args,{cwd,stdio:'inherit'});
-function zip(dir,dest){if(fs.existsSync(dest))throw Error('附件已存在，禁止覆盖：'+dest);if(process.platform==='win32')run('powershell',['-NoProfile','-Command',"Compress-Archive -Path '"+dir.replaceAll("'","''")+"/*' -DestinationPath '"+dest.replaceAll("'","''")+"'"],dir);else run('zip',['-q','-r',dest,'.'],dir);}
-const temp=fs.mkdtempSync(path.join(os.tmpdir(),'workbench-release-'));
-for(const product of ['cloud','offline']){
- const meta={product,...products[product],commit};const prefix='personal-workbench-'+(product==='offline'?'offline-':'')+'v'+meta.version;
- const source=path.join(temp,product+'-source');fs.mkdirSync(source);
- const archive=path.join(temp,product+'.zip');
- const paths=['src','public','tests','scripts','release','index.html','vite.config.js','package.json','package-lock.json','README.md','LICENSE','docs/version-history.md','services/workbench-api/src','services/workbench-api/test','services/workbench-api/scripts','services/workbench-api/package.json','services/workbench-api/package-lock.json','services/workbench-api/migrations','services/workbench-api/wrangler.example.jsonc'];
- run('git',['archive','--format=zip','--output='+archive,commit,...paths],root);
- if(process.platform==='win32')run('powershell',['-NoProfile','-Command',"Expand-Archive -LiteralPath '"+archive+"' -DestinationPath '"+source+"'"],root);else run('unzip',['-q',archive,'-d',source],root);
- fs.writeFileSync(path.join(source,'release/default-product.json'),JSON.stringify(product));
- fs.writeFileSync(path.join(source,'SOURCE.json'),JSON.stringify({...meta,configuration:'release/default-product.json selects this product; business source is unchanged',build:'npm ci; npm run build'},null,2));
- zip(source,path.join(output,prefix+'-source.zip'));
- const web=path.join(temp,product+'-web');fs.mkdirSync(web);
- const input=path.join(root,product==='offline'?'dist/offline':'dist');
- const info=JSON.parse(fs.readFileSync(path.join(input,'release-info.json')));if(info.commit!==commit||info.version!==meta.version||info.product!==product)throw Error('构建来源不匹配');
- for(const file of fs.readdirSync(input)){if(product==='cloud'&&file==='offline')continue;fs.cpSync(path.join(input,file),path.join(web,file),{recursive:true});}
- fs.writeFileSync(path.join(web,'DEPLOY.txt'),meta.label+' '+meta.version+'\n来源提交 '+commit+'\n部署路径 '+meta.base+'\n静态成品，非 Windows 安装包；请使用 HTTPS 或 localhost 静态服务，不保证双击 HTML。首次联网并等待缓存完成后才能离线。更新需接受应用更新提示。\n请先导出 JSON 备份；导入会整份覆盖本产品数据。两产品数据不自动互通。\n'+(product==='cloud'?'云端仅配置的所有者可用；需要兼容 Worker、OAuth 回调和所有者授权，非多人服务。':'无需云凭据，不启动业务云请求。'));
- zip(web,path.join(output,prefix+'-web.zip'));
+import fs from 'node:fs';import path from 'node:path';import os from 'node:os';
+import{args,planFor,context,run,git,isMain,fileHash,zipName}from'./core.mjs';
+const quote=value=>"'"+value.replaceAll("'","''")+"'";
+export function extract(zip,dest){fs.mkdirSync(dest,{recursive:true});if(process.platform==='win32')run('powershell',['-NoProfile','-Command','Expand-Archive -LiteralPath '+quote(zip)+' -DestinationPath '+quote(dest)]);else run('unzip',['-q',zip,'-d',dest]);}
+export function inspect(zip,plan,product,kind){const dest=fs.mkdtempSync(path.join(os.tmpdir(),'workbench-package-'));extract(zip,dest);const info=JSON.parse(fs.readFileSync(path.join(dest,kind==='source'?'SOURCE.json':'release-info.json')));if(info.commit!==plan.commit||info.product!==product||info.version!==plan.products[product].version)throw Error('包内产品/版本/提交错误 '+zip);return dest;}
+function compress(dir,dest){if(process.platform==='win32')run('powershell',['-NoProfile','-Command','Compress-Archive -Path '+quote(dir+'/*')+' -DestinationPath '+quote(dest)]);else run('zip',['-X','-q','-r',dest,'.'],dir);}
+export async function packageProduct(ctx,product){const {plan,state,step}=ctx,dir=ctx.productDir(product),out=path.join(dir,'packages');fs.mkdirSync(out,{recursive:true});state.products[product]??={};
+ for(const kind of ['source','web']){
+  const name=zipName(plan,product,kind),dest=path.join(out,name);
+  await step(product+'.package.'+kind,async()=>{
+   // rename 后但记录前中断：实际解压确认后接纳成品；损坏的正式文件不静默覆盖。
+   if(!fs.existsSync(dest)){
+    const stage=fs.mkdtempSync(path.join(os.tmpdir(),'workbench-pack-'));
+    if(kind==='source'){
+     const archive=path.join(os.tmpdir(),'workbench-source-'+crypto.randomUUID()+'.zip');
+     run('git',['archive','--format=zip','--output='+archive,plan.commit,'src','public','tests','scripts','release','.github','index.html','vite.config.js','package.json','package-lock.json','README.md','LICENSE','docs/version-history.md',...(git('ls-tree','--name-only',plan.commit,'docs/release-setup.md')?['docs/release-setup.md']:[]),'services/workbench-api/src','services/workbench-api/test','services/workbench-api/scripts','services/workbench-api/package.json','services/workbench-api/package-lock.json','services/workbench-api/migrations','services/workbench-api/wrangler.example.jsonc']);extract(archive,stage);
+     fs.writeFileSync(path.join(stage,'release/default-product.json'),JSON.stringify(product));fs.writeFileSync(path.join(stage,'SOURCE.json'),JSON.stringify({product,...plan.products[product],commit:plan.commit,configuration:'default-product.json selects this product; business source unchanged',build:'npm ci; npm run build'},null,2));
+    }else{fs.cpSync(path.join(dir,'site'),stage,{recursive:true});fs.writeFileSync(path.join(stage,'DEPLOY.txt'),plan.products[product].label+' '+plan.products[product].version+'\n来源提交 '+plan.commit+'\n部署路径 '+plan.products[product].base+'\n静态网页，非Windows安装包。使用HTTPS或localhost；首次联网缓存完成后可离线，接受更新提示升级。源码包默认构建对应产品。更新前导出JSON备份；导入整份覆盖并保留现有同步绑定保护。含云版仍仅供现有所有者使用，需要兼容Worker和OAuth；脱机版无业务云请求。');}
+    const temp=dest+'.partial.zip';if(fs.existsSync(temp))fs.unlinkSync(temp);compress(stage,temp);inspect(temp,plan,product,kind);fs.renameSync(temp,dest);
+   }else inspect(dest,plan,product,kind);
+   return {name,sha256:fileHash(dest),size:fs.statSync(dest).size};
+  },record=>{if(!fs.existsSync(dest))return false;if(fileHash(dest)!==record.sha256)throw Error('成品ZIP校验值冲突 '+name);return true;});
+ }
 }
-console.log('Packages: '+output);
+if(isMain(import.meta.url)){const a=args(),ctx=context(planFor(a.target));for(const p of ctx.plan.selected)await packageProduct(ctx,p);}

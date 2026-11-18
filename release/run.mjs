@@ -1,17 +1,11 @@
-// 单一明确发布动作：必须先提交全部本批代码；不自动升号、不移动既有标签。
-import fs from 'node:fs';import{execFileSync}from'node:child_process';
-const run=(cmd,args,cwd=process.cwd())=>execFileSync(cmd,args,{cwd,stdio:'inherit',shell:process.platform==='win32'&&cmd==='npm'});
-if(execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).trim())throw Error('请在干净的发布工作树执行');
-run('npm',['test']);run('npm',['test'],'services/workbench-api');run('npm',['run','check'],'services/workbench-api');run('npm',['run','build:all']);
-run(process.execPath,['scripts/check-products.mjs']);
-if(!fs.existsSync('release-assets'))run(process.execPath,['release/package.mjs']);
-run(process.execPath,['release/verify.mjs']);
-const sha=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
-for(const meta of Object.values(JSON.parse(fs.readFileSync('release/products.json')))){
- let target;try{target=execFileSync('git',['rev-parse',meta.tag+'^{commit}'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim()}catch{}
- if(target&&target!==sha)throw Error('标签已指向其他提交，不能覆盖');if(!target)run('git',['tag',meta.tag,sha]);
+// 本机只做只读计划/触发/等待。重活在 Actions；断开本机不会中断发布。
+import{args,planFor,notes,REPO,zipName}from'./core.mjs';import{github}from'./github.mjs';import{waitFor}from'./http.mjs';
+const a=args(),plan=planFor(a.target,a.sha);for(const p of plan.selected)notes(plan,p);
+const preview={target:plan.target,commit:plan.commit,products:plan.selected.map(p=>({product:p,version:plan.products[p].version,site:'https://ningle-42411164.github.io'+plan.products[p].base,tag:plan.products[p].tag,release:plan.products[p].releaseTitle,assets:['source','web'].map(k=>zipName(plan,p,k))})),unselected:['cloud','offline'].filter(p=>!plan.selected.includes(p))};console.log(JSON.stringify(preview,null,2));
+if(!a['dry-run']){
+ await github('/repos/'+REPO+'/commits/'+plan.commit);
+ const route='/repos/'+REPO+'/actions/workflows/release.yml/runs?event=workflow_dispatch&per_page=50';const before=await github(route);const title='Release '+plan.key;let run=before.workflow_runs.find(x=>x.display_title===title&&x.status!=='completed');
+ if(!run){await github('/repos/'+REPO+'/actions/workflows/release.yml/dispatches',{method:'POST',body:{ref:'main',inputs:{target:plan.target,commit:plan.commit}}});run=await waitFor(async()=>{const runs=await github(route);return runs.workflow_runs.find(x=>x.display_title===title&&!before.workflow_runs.some(old=>old.id===x.id));},{attempts:6,interval:5000,label:'发布任务创建'});}
+ console.log('发布任务：'+run.html_url+'；本机退出不影响执行。');
+ if(!a['no-wait']){try{const result=await waitFor(async()=>{const current=await github('/repos/'+REPO+'/actions/runs/'+run.id);return current.status==='completed'?current:false;},{attempts:20,interval:60000,label:'发布任务（本机等待上限20分钟）'});console.log('结果：'+result.conclusion+'；中文逐项报告见任务 Summary 与 release-state-final 产物。');if(result.conclusion!=='success')process.exitCode=1;}catch(e){console.error(e.message+' 任务链接：'+run.html_url);process.exitCode=1;}}
 }
-run('git',['push','origin','HEAD:main',...Object.values(JSON.parse(fs.readFileSync('release/products.json'))).map(x=>x.tag)]);
-run(process.execPath,['release/deploy-offline.mjs']);
-run(process.execPath,['release/verify-online.mjs']);
-run(process.execPath,['release/publish.mjs']);
